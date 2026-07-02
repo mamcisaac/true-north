@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "true-north",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5189"],
+      "port": 5189
+    }
+  ]
+}
