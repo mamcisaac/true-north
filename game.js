@@ -97,6 +97,7 @@
   };
 
   function onOrientation(e) {
+    var was = sensor.mode;
     if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
       sensor.mode = 'ios';
       sensor.heading = e.webkitCompassHeading;
@@ -104,6 +105,22 @@
       sensor.mode = 'android';
       var screenA = (screen.orientation && screen.orientation.angle) || 0;
       sensor.heading = (360 - e.alpha + screenA) % 360;
+    }
+    // First real compass reading often lands after the round is already on
+    // screen — flip the dial-mode hints over to compass-mode wording.
+    if (was === 'dial' && sensor.mode !== 'dial') refreshModeHints();
+  }
+
+  function refreshModeHints() {
+    var dial = sensor.mode === 'dial';
+    if (state && !state.locked) {
+      $('target-kicker').textContent = dial ? 'Drag the needle toward…' : 'Point your phone toward…';
+      holdHint.textContent = dial ? 'Drag to aim, release' : 'Hold, aim, release';
+    }
+    if (state) {
+      $('mode-note').textContent = dial
+        ? 'No compass detected — drag the dial to aim.'
+        : 'Compass mode — physically point your phone.';
     }
   }
 
@@ -241,14 +258,20 @@
       if (!compassEl.classList.contains('is-aiming')) return;
       if (sensor.mode === 'dial') sensor.dial = dialAngleFromEvent(ev);
     });
-    var release = function () {
+    compassEl.addEventListener('pointerup', function () {
       if (!compassEl.classList.contains('is-aiming')) return;
       compassEl.classList.remove('is-aiming');
       if (aimRaf) cancelAnimationFrame(aimRaf);
       lockGuess();
-    };
-    compassEl.addEventListener('pointerup', release);
-    compassEl.addEventListener('pointercancel', release);
+    });
+    // A cancelled pointer (system dialog, gesture interruption) aborts the
+    // aim WITHOUT locking — the player never chose to release.
+    compassEl.addEventListener('pointercancel', function () {
+      if (!compassEl.classList.contains('is-aiming')) return;
+      compassEl.classList.remove('is-aiming');
+      if (aimRaf) cancelAnimationFrame(aimRaf);
+      liveEl.innerHTML = '&nbsp;';
+    });
   }
 
   // ── Location + game start ───────────────────────────────────────────────────
