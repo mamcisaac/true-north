@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="description" content="Hold your phone, point at a real place anywhere on Earth, and see how many degrees off you were. Part of the Connect the Thoughts arcade.">
+  <meta name="description" content="Set your phone down, spin the needle toward a real place, pick a distance, and throw a dart around the globe. Part of the Connect the Thoughts arcade.">
   <title>True North — Connect the Thoughts</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="tokens.css">
@@ -21,6 +21,8 @@
     })();
   </script>
   <script src="arcade.js" defer></script>
+  <script src="world-land.js" defer></script>
+  <script src="globe.js" defer></script>
   <script src="game.js" defer></script>
 </head>
 <body>
@@ -70,41 +72,60 @@
 
     <div class="tn-status">
       <span id="round-label">Round <b id="round-num">–</b> / 5</span>
-      <span id="score-label">Avg error <b id="avg-error">–</b></span>
+      <span id="score-label">Score <b id="score-total">–</b> / 5000</span>
     </div>
 
     <section class="tn-target" id="target-card">
-      <p class="tn-target-kicker" id="target-kicker">Point your phone toward…</p>
+      <p class="tn-target-kicker" id="target-kicker">Which way to…</p>
       <h2 class="tn-target-name" id="target-name">…</h2>
       <p class="tn-target-sub" id="target-sub"></p>
     </section>
 
-    <section class="tn-compass-wrap">
-      <div class="tn-compass" id="compass" aria-label="Compass — hold to aim, release to lock">
+    <!-- AIM: unlabelled rose — nothing on it hints at north -->
+    <section class="tn-panel" id="panel-aim" hidden>
+      <div class="tn-compass" id="compass" aria-label="Compass — drag the needle to aim">
         <svg viewBox="0 0 240 240" width="100%" height="100%" aria-hidden="true">
           <circle cx="120" cy="120" r="112" class="tn-ring"/>
           <circle cx="120" cy="120" r="104" class="tn-face"/>
           <g class="tn-ticks" id="ticks"></g>
-          <text x="120" y="34"  class="tn-card-letter">N</text>
-          <text x="206" y="126" class="tn-card-letter">E</text>
-          <text x="120" y="218" class="tn-card-letter">S</text>
-          <text x="34"  y="126" class="tn-card-letter">W</text>
-          <!-- true-bearing needle, revealed after locking -->
-          <g id="needle-true" class="tn-needle-true" hidden>
-            <path d="M120 32 L128 120 L120 132 L112 120 Z"/>
-          </g>
-          <!-- the player's needle -->
           <g id="needle-you" class="tn-needle-you">
             <path d="M120 26 L130 120 L120 136 L110 120 Z"/>
             <circle cx="120" cy="120" r="9"/>
           </g>
           <circle cx="120" cy="120" r="4" class="tn-hub"/>
         </svg>
-        <div class="tn-hold-hint" id="hold-hint">Hold, aim, release</div>
+        <div class="tn-hold-hint" id="hold-hint">Drag the needle</div>
       </div>
-      <p class="tn-live" id="live-readout">&nbsp;</p>
+      <div class="tn-nudge-row">
+        <button id="aim-minus" class="tn-nudge" type="button" aria-label="Rotate needle 1 degree counter-clockwise">⟲</button>
+        <button id="lock-btn" class="tn-btn tn-btn-primary tn-btn-wide" type="button">Lock direction</button>
+        <button id="aim-plus" class="tn-nudge" type="button" aria-label="Rotate needle 1 degree clockwise">⟳</button>
+      </div>
     </section>
 
+    <!-- DISTANCE: phone stays on the table — big slider, big nudges -->
+    <section class="tn-panel" id="panel-distance" hidden>
+      <p class="tn-distance-readout"><b id="distance-km">8,000</b> km</p>
+      <input id="distance-slider" class="tn-slider" type="range" min="0" max="1000" step="1" value="420"
+             aria-label="Distance in kilometres">
+      <p class="tn-slider-note">Halfway around the world is 20,000 km</p>
+      <div class="tn-nudge-row">
+        <button id="dist-minus" class="tn-nudge" type="button" aria-label="Less distance">−</button>
+        <button id="throw-btn" class="tn-btn tn-btn-primary tn-btn-wide" type="button">Throw 🎯</button>
+        <button id="dist-plus" class="tn-nudge" type="button" aria-label="More distance">+</button>
+      </div>
+    </section>
+
+    <!-- REVEAL: the globe -->
+    <section class="tn-panel" id="panel-reveal" hidden>
+      <div class="tn-globe-wrap">
+        <canvas id="globe" aria-label="Globe showing your dart's flight"></canvas>
+      </div>
+      <p class="tn-globe-caption" id="globe-caption">&nbsp;</p>
+      <p class="tn-skip-hint" id="skip-hint">tap the globe to skip</p>
+    </section>
+
+    <!-- ROUND SCORE -->
     <section class="tn-result" id="result" hidden>
       <p class="tn-verdict" id="verdict">–</p>
       <p class="tn-detail" id="result-detail">–</p>
@@ -127,9 +148,10 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
       <button class="modal-close-x" id="help-close" type="button" aria-label="Close">×</button>
       <h2 id="help-title">How to play</h2>
-      <p>The game names a real place somewhere on Earth. <strong>Hold your finger on the compass</strong>, physically point the top of your phone toward where you think it is, then <strong>release to lock your guess</strong>.</p>
-      <p>The compass then reveals the true direction (measured from your location along the great-circle path) and how many degrees off you were. Five places per game — the lower your average error, the better.</p>
-      <p>On a computer (no compass), drag the needle around the dial to aim instead.</p>
+      <p><strong>Lay your phone flat and don't move it.</strong> The game secretly reads your compass — but never shows you north.</p>
+      <p>A real place is named. <strong>Drag the needle</strong> to point in the real-world direction you think it lies and lock it in. Then <strong>set how far away it is</strong> — up to 40,000 km, all the way around the world — and throw.</p>
+      <p>A globe appears, oriented the way your phone is actually facing. Your dart flies your chosen direction and distance along the curve of the Earth. The closer it lands to the true spot, the more points you get — up to 1000 per round, five rounds per game.</p>
+      <p>On a computer (no compass), the top of the screen counts as north.</p>
     </div>
   </div>
 </body>

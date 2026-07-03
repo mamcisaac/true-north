@@ -1,4 +1,4 @@
-/* True North — point at a real place, see how far off you were.
+/* True North — spin the needle, pick a distance, throw a dart around the globe.
    Token-only styling on top of the shared arcade tokens/chrome. */
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -54,8 +54,11 @@ body { display: flex; flex-direction: column; }
 .tn-target-name { margin: 0; font-size: 26px; line-height: 1.2; }
 .tn-target-sub { margin: 4px 0 0; font-size: 13px; color: var(--fg-muted); min-height: 1.2em; }
 
+/* ── Panels (one per state) ─────────────────────── */
+.tn-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.tn-panel[hidden] { display: none; }
+
 /* ── Compass ────────────────────────────────────── */
-.tn-compass-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .tn-compass {
   position: relative;
   width: min(78vw, 340px);
@@ -68,18 +71,10 @@ body { display: flex; flex-direction: column; }
 .tn-ring  { fill: none; stroke: var(--border-strong); stroke-width: 2; }
 .tn-face  { fill: var(--bg-elev); stroke: var(--border); stroke-width: 1; }
 .tn-ticks line { stroke: var(--border-strong); stroke-width: 2; }
-.tn-card-letter {
-  fill: var(--fg-muted);
-  font-size: 15px;
-  font-weight: 700;
-  text-anchor: middle;
-  dominant-baseline: middle;
-}
 .tn-needle-you path   { fill: var(--accent); }
 .tn-needle-you circle { fill: var(--accent); }
-.tn-needle-true path  { fill: var(--good, #22c55e); opacity: 0.9; }
 .tn-hub { fill: var(--bg); }
-#needle-you, #needle-true {
+#needle-you {
   transform-origin: 120px 120px;
   transition: transform 0.25s ease-out;
 }
@@ -106,12 +101,117 @@ body { display: flex; flex-direction: column; }
 }
 .tn-compass.is-aiming .tn-hold-hint { color: var(--accent); }
 
-.tn-live {
-  margin: 0;
-  font-size: 14px;
+/* ── Nudge rows (aim fine-tune + distance fine-tune) ── */
+.tn-nudge-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+.tn-nudge {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tn-nudge:active { background: var(--border); }
+.tn-btn-wide { flex: 0 1 220px; }
+
+/* ── Distance panel ─────────────────────────────── */
+.tn-distance-readout {
+  margin: 4px 0 0;
+  font-size: 15px;
   color: var(--fg-muted);
+  text-align: center;
+}
+.tn-distance-readout b {
+  font-size: 40px;
+  color: var(--fg);
   font-variant-numeric: tabular-nums;
-  min-height: 1.3em;
+  letter-spacing: -0.01em;
+}
+.tn-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 44px;               /* generous touch strip */
+  background: transparent;
+  touch-action: pan-x;
+  cursor: pointer;
+}
+.tn-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+}
+.tn-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  box-shadow: var(--shadow-md);
+  margin-top: -12px;
+}
+.tn-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+}
+.tn-slider::-moz-range-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  box-shadow: var(--shadow-md);
+}
+.tn-slider-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+/* ── Globe reveal ───────────────────────────────── */
+.tn-globe-wrap {
+  width: min(92vw, 440px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+#globe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tn-globe-caption {
+  margin: 0;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  min-height: 1.4em;
+}
+.tn-skip-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
 }
 
 /* ── Result ─────────────────────────────────────── */

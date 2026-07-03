@@ -1,14 +1,24 @@
 # True North
 
-Hold your finger on the compass, physically point the top of your phone toward
-a named real-world place, and release to lock your guess. The game computes the
-true great-circle bearing from your location and scores how many degrees off
-you were — five places per game, lowest average error wins.
+Lay your phone flat and don't move it. The game silently reads the device
+compass — but never shows you north. A real place is named: spin the on-screen
+needle toward where you think it lies (your guess bearing = device heading +
+needle angle), lock it, set a distance (0–40,000 km), and throw. A canvas
+globe — oriented the way your phone is physically facing — shows your dart
+flying the great-circle path for your chosen bearing and distance, then
+measures how far it landed from the true spot. Up to 1000 points per round
+(exponential falloff by landing gap), five rounds per game, 5000 max.
 
-- **Phone**: uses the device compass (`webkitCompassHeading` on iOS, absolute
-  `deviceorientation` elsewhere) + geolocation. Both permissions ride the Start
-  tap / first hold.
-- **Desktop / no compass**: falls back to dragging the needle around the dial.
+- **Phone**: device compass (`webkitCompassHeading` on iOS, absolute
+  `deviceorientation` elsewhere) + geolocation, both prompted on the Start tap.
+  The heading is frozen at the moment you lock your direction. Android heading
+  is magnetic north (declination uncorrected) — accepted approximation.
+- **Desktop / no compass**: fully playable; the top of the screen counts as
+  north. `?heading=NN` fakes a device heading for testing the globe
+  orientation math.
+- **Globe**: hand-rolled canvas-2D orthographic projection (`globe.js`), no
+  dependencies. Land polygons are Natural Earth 110m (public domain) via
+  world-atlas@2, converted to `world-land.js` at vendoring time.
 
 Part of the [Connect the Thoughts](https://connectthethoughts.ca/) arcade.
 Static, no build step. Shared assets (`tokens.css`, `chrome.css`, `arcade.js`,

@@ -1,7 +1,13 @@
-// True North — hold your finger on the compass, physically point the top of
-// your phone at a real place, release to lock. The game reveals the true
-// great-circle bearing from your location and scores the angular error.
-// On devices with no compass (desktop), the dial is dragged to aim instead.
+// True North — lay your phone flat, spin the needle toward a real place,
+// pick a distance, and throw a dart around the globe.
+//
+// The device compass is read silently: north is NEVER shown before the lock.
+// The needle angle is screen-relative; the real-world guess bearing is
+// (device heading + needle angle). The phone must not move — heading is
+// frozen the moment the player locks their direction.
+//
+// No compass (desktop, or permission denied): heading = 0, i.e. the top of
+// the screen counts as north. Same game, minus the physical twist.
 (function () {
   'use strict';
 
@@ -65,6 +71,7 @@
 
   var ROUNDS = 5;
   var MIN_KM = 100; // bearings to very nearby targets are unstable — skip them
+  var MAX_KM = 40000;
 
   // ── Geometry ────────────────────────────────────────────────────────────────
   var R = Math.PI / 180;
@@ -81,53 +88,50 @@
             Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) * Math.sin(dl / 2);
     return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
-  function angleDiff(a, b) {
-    var d = Math.abs(a - b) % 360;
-    return d > 180 ? 360 - d : d;
-  }
-  function fmtDeg(d) { return Math.round(d) + '°'; }
-  function compassPoint(deg) {
-    var pts = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-    return pts[Math.round(deg / 22.5) % 16];
-  }
+  function fmtKm(km) { return Math.round(km).toLocaleString(); }
 
   // ── DOM ─────────────────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
-  var compassEl, needleYou, needleTrue, liveEl, holdHint;
+  var compassEl, needleYou, globe;
 
-  // ── Heading source: device compass, or drag-the-dial fallback ──────────────
+  // ── Heading source ──────────────────────────────────────────────────────────
+  // The compass is read continuously but only USED at the moment of lock.
+  // A circular mean of recent samples smooths sensor jitter. Note: on Android
+  // the heading is magnetic, not true (declination is uncorrected — up to
+  // ~15-25° near the poles); iOS webkitCompassHeading is true heading when
+  // Location Services are on. Accepted approximation: the distance guess
+  // dominates the error budget.
   var sensor = {
-    mode: 'dial',        // 'ios' | 'android' | 'dial'
-    heading: 0,          // latest device heading (deg from true-ish north)
-    dial: 0,             // dial-mode aim angle
+    hasCompass: false,
     listening: false,
+    sinSum: 0, cosSum: 0, samples: [],
+    fake: null,          // ?heading=NN test override
   };
 
-  function onOrientation(e) {
-    var was = sensor.mode;
-    if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
-      sensor.mode = 'ios';
-      sensor.heading = e.webkitCompassHeading;
-    } else if (e.alpha != null && (e.absolute || sensor.mode === 'android')) {
-      sensor.mode = 'android';
-      var screenA = (screen.orientation && screen.orientation.angle) || 0;
-      sensor.heading = (360 - e.alpha + screenA) % 360;
+  function pushHeading(h) {
+    sensor.hasCompass = true;
+    var rad = h * R;
+    sensor.samples.push(rad);
+    sensor.sinSum += Math.sin(rad);
+    sensor.cosSum += Math.cos(rad);
+    if (sensor.samples.length > 20) {
+      var old = sensor.samples.shift();
+      sensor.sinSum -= Math.sin(old);
+      sensor.cosSum -= Math.cos(old);
     }
-    // First real compass reading often lands after the round is already on
-    // screen — flip the dial-mode hints over to compass-mode wording.
-    if (was === 'dial' && sensor.mode !== 'dial') refreshModeHints();
+  }
+  function currentHeading() {
+    if (sensor.fake != null) return sensor.fake;
+    if (!sensor.hasCompass) return 0; // top of screen counts as north
+    return ((Math.atan2(sensor.sinSum, sensor.cosSum) / R) + 360) % 360;
   }
 
-  function refreshModeHints() {
-    var dial = sensor.mode === 'dial';
-    if (state && !state.locked) {
-      $('target-kicker').textContent = dial ? 'Drag the needle toward…' : 'Point your phone toward…';
-      holdHint.textContent = dial ? 'Drag to aim, release' : 'Hold, aim, release';
-    }
-    if (state) {
-      $('mode-note').textContent = dial
-        ? 'No compass detected — drag the dial to aim.'
-        : 'Compass mode — physically point your phone.';
+  function onOrientation(e) {
+    if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
+      pushHeading(e.webkitCompassHeading); // iOS
+    } else if (e.alpha != null && (e.absolute || sensor.hasCompass)) {
+      var screenA = (screen.orientation && screen.orientation.angle) || 0;
+      pushHeading((360 - e.alpha + screenA) % 360); // Android
     }
   }
 
@@ -143,25 +147,22 @@
         typeof DeviceOrientationEvent.requestPermission === 'function') {
       return DeviceOrientationEvent.requestPermission()
         .then(function (state) { if (state === 'granted') attach(); })
-        .catch(function () { /* stays in dial mode */ });
+        .catch(function () { /* no compass — top of screen is north */ });
     }
     attach();
     return Promise.resolve();
   }
 
-  function currentAim() {
-    // If real compass data has arrived, trust it; otherwise the dial.
-    return (sensor.mode === 'dial') ? sensor.dial : sensor.heading;
-  }
-
   // ── Game state ──────────────────────────────────────────────────────────────
-  var state = null; // { origin:{lat,lon}, targets:[...], idx, errors:[], locked }
+  // phase: idle | locating | aim | distance | reveal | score | final
+  var state = null;
+  // { origin, targets, idx, scores:[], needleAngle, headingAtLock,
+  //   bearing, distKm, landing, gapKm, points }
 
   function pickTargets(origin) {
     var pool = PLACES.filter(function (p) {
       return distanceKm(origin.lat, origin.lon, p[1], p[2]) >= MIN_KM;
     });
-    // Fisher–Yates on a copy, take the first ROUNDS.
     var a = pool.slice();
     for (var i = a.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1));
@@ -170,131 +171,248 @@
     return a.slice(0, ROUNDS);
   }
 
-  function verdictFor(err) {
-    if (err <= 10)  return { text: 'Bullseye!',      cls: 'good' };
-    if (err <= 25)  return { text: 'Sharp.',          cls: 'good' };
-    if (err <= 60)  return { text: 'Warm-ish.',       cls: 'warn' };
-    if (err <= 120) return { text: 'Cold.',           cls: 'bad'  };
-    return { text: 'Wrong hemisphere!', cls: 'bad' };
+  // ── Scoring ─────────────────────────────────────────────────────────────────
+  function scoreFor(gapKm) {
+    if (gapKm <= 25) return 1000;
+    return Math.round(1000 * Math.exp(-gapKm / 2000));
+  }
+  function tierFor(points) {
+    if (points >= 700) return 'good';
+    if (points >= 300) return 'warn';
+    return 'bad';
+  }
+  function verdictText(points) {
+    if (points >= 1000) return 'BULLSEYE!';
+    if (points >= 700)  return 'So close!';
+    if (points >= 450)  return 'Nice throw.';
+    if (points >= 300)  return 'Getting warm.';
+    if (points >= 100)  return 'Wide of the mark.';
+    return 'Wrong side of the world!';
   }
 
-  // ── Rendering ───────────────────────────────────────────────────────────────
-  function setNeedle(el, deg) { el.style.transform = 'rotate(' + deg + 'deg)'; }
+  // ── Panels / phases ─────────────────────────────────────────────────────────
+  function showPhase(phase) {
+    $('panel-aim').hidden = phase !== 'aim';
+    $('panel-distance').hidden = phase !== 'distance';
+    $('panel-reveal').hidden = phase !== 'reveal' && phase !== 'score';
+    $('result').hidden = phase !== 'score' && phase !== 'final';
+    $('skip-hint').hidden = phase !== 'reveal';
+    $('target-card').hidden = phase === 'final';
+  }
+
+  function totalScore() {
+    return state ? state.scores.reduce(function (s, x) { return s + x; }, 0) : 0;
+  }
+  function refreshStatus() {
+    $('round-num').textContent = state ? String(state.idx + 1) : '–';
+    $('score-total').textContent = state ? String(totalScore()) : '–';
+  }
 
   function showRound() {
     var t = state.targets[state.idx];
-    $('round-num').textContent = String(state.idx + 1);
-    $('target-kicker').textContent = sensor.mode === 'dial'
-      ? 'Drag the needle toward…' : 'Point your phone toward…';
+    state.needleAngle = Math.floor(Math.random() * 360); // random start — no anchor hint
+    setNeedle(state.needleAngle);
+    $('target-kicker').textContent = 'Which way to…';
     $('target-name').textContent = t[3] + ' ' + t[0];
-    $('target-sub').textContent = '';
-    $('result').hidden = true;
+    $('target-sub').textContent = 'Spin the needle, then lock it in';
     $('next-btn').hidden = true;
     $('again-btn').hidden = true;
-    needleTrue.hidden = true;
-    state.locked = false;
-    holdHint.textContent = sensor.mode === 'dial' ? 'Drag to aim, release' : 'Hold, aim, release';
-    liveEl.innerHTML = '&nbsp;';
+    $('mode-note').textContent = sensor.hasCompass || sensor.fake != null
+      ? 'Keep your phone flat and still.'
+      : 'No compass — the top of the screen counts as north.';
+    refreshStatus();
+    showPhase('aim');
   }
 
-  function lockGuess() {
-    if (!state || state.locked) return;
-    state.locked = true;
-    var t = state.targets[state.idx];
-    var guess = currentAim();
-    var truth = bearingTo(state.origin.lat, state.origin.lon, t[1], t[2]);
-    var err = angleDiff(guess, truth);
-    state.errors.push(err);
-
-    // In sensor mode the dial is a fixed frame (N at top); show both needles.
-    setNeedle(needleYou, guess);
-    setNeedle(needleTrue, truth);
-    needleTrue.hidden = false;
-
-    var v = verdictFor(err);
-    $('verdict').textContent = v.text + ' ' + fmtDeg(err) + ' off';
-    $('verdict').className = 'tn-verdict ' + v.cls;
-    var km = Math.round(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2]));
-    $('result-detail').textContent =
-      t[0] + ' is ' + km.toLocaleString() + ' km away, bearing ' +
-      fmtDeg(truth) + ' (' + compassPoint(truth) + '). You aimed ' +
-      fmtDeg(guess) + ' (' + compassPoint(guess) + ').';
-    $('result').hidden = false;
-
-    var avg = state.errors.reduce(function (s, e) { return s + e; }, 0) / state.errors.length;
-    $('avg-error').textContent = fmtDeg(avg);
-
-    if (state.idx + 1 < ROUNDS) {
-      $('next-btn').hidden = false;
-    } else {
-      var fv = verdictFor(avg);
-      $('verdict').textContent = 'Final: ' + fmtDeg(avg) + ' average — ' + fv.text;
-      $('verdict').className = 'tn-verdict ' + fv.cls;
-      $('again-btn').hidden = false;
-    }
+  // ── AIM: drag the needle (screen-relative; north never shown) ──────────────
+  function setNeedle(deg) {
+    needleYou.style.transform = 'rotate(' + deg + 'deg)';
   }
-
-  // ── Aiming interactions ─────────────────────────────────────────────────────
-  var aimRaf = null;
-  function aimLoop() {
-    if (!compassEl.classList.contains('is-aiming')) return;
-    var a = currentAim();
-    setNeedle(needleYou, a);
-    liveEl.textContent = fmtDeg(a) + ' ' + compassPoint(a);
-    aimRaf = requestAnimationFrame(aimLoop);
-  }
-
   function dialAngleFromEvent(ev) {
     var r = compassEl.getBoundingClientRect();
     var dx = ev.clientX - (r.left + r.width / 2);
     var dy = ev.clientY - (r.top + r.height / 2);
     return (Math.atan2(dx, -dy) / R + 360) % 360;
   }
-
   function installAimHandlers() {
+    var dragging = false;
     compassEl.addEventListener('pointerdown', function (ev) {
-      if (!state) { // holding before Start shouldn't feel like a dead screen
-        liveEl.textContent = 'Tap Start first';
-        return;
-      }
-      if (state.locked) return;
+      if (!state || state.phase !== 'aim') return;
       ev.preventDefault();
-      try { compassEl.setPointerCapture(ev.pointerId); } catch (_) { /* synthetic/stale pointer */ }
+      try { compassEl.setPointerCapture(ev.pointerId); } catch (_) { /* stale pointer */ }
+      dragging = true;
       compassEl.classList.add('is-aiming');
-      if (sensor.mode === 'dial') sensor.dial = dialAngleFromEvent(ev);
-      startSensors(); // iOS permission prompt rides the first hold
-      aimLoop();
+      state.needleAngle = dialAngleFromEvent(ev);
+      setNeedle(state.needleAngle);
     });
     compassEl.addEventListener('pointermove', function (ev) {
-      if (!compassEl.classList.contains('is-aiming')) return;
-      if (sensor.mode === 'dial') sensor.dial = dialAngleFromEvent(ev);
+      if (!dragging) return;
+      state.needleAngle = dialAngleFromEvent(ev);
+      setNeedle(state.needleAngle);
     });
-    compassEl.addEventListener('pointerup', function () {
-      if (!compassEl.classList.contains('is-aiming')) return;
+    function endDrag() {
+      dragging = false;
       compassEl.classList.remove('is-aiming');
-      if (aimRaf) cancelAnimationFrame(aimRaf);
-      lockGuess();
+      // Releasing does NOT lock — the needle stays; only the button commits.
+    }
+    compassEl.addEventListener('pointerup', endDrag);
+    compassEl.addEventListener('pointercancel', endDrag);
+  }
+
+  // Press-and-hold auto-repeat for nudge buttons.
+  function holdRepeat(btn, fn) {
+    var timer = null, started = 0;
+    function fire() {
+      fn(Date.now() - started > 1200 ? 10 : 1); // accelerate after 1.2 s
+    }
+    btn.addEventListener('pointerdown', function (ev) {
+      ev.preventDefault();
+      started = Date.now();
+      fire();
+      timer = setInterval(fire, 90);
     });
-    // A cancelled pointer (system dialog, gesture interruption) aborts the
-    // aim WITHOUT locking — the player never chose to release.
-    compassEl.addEventListener('pointercancel', function () {
-      if (!compassEl.classList.contains('is-aiming')) return;
-      compassEl.classList.remove('is-aiming');
-      if (aimRaf) cancelAnimationFrame(aimRaf);
-      liveEl.innerHTML = '&nbsp;';
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (evt) {
+      btn.addEventListener(evt, function () { if (timer) { clearInterval(timer); timer = null; } });
     });
   }
 
+  function nudgeAim(dir) {
+    return function (mult) {
+      if (!state || state.phase !== 'aim') return;
+      state.needleAngle = (state.needleAngle + dir * mult + 360) % 360;
+      setNeedle(state.needleAngle);
+    };
+  }
+
+  function lockDirection() {
+    if (!state || state.phase !== 'aim') return;
+    state.headingAtLock = currentHeading(); // frozen: the phone isn't moving
+    state.bearing = (state.headingAtLock + state.needleAngle) % 360;
+    state.phase = 'distance';
+    $('target-kicker').textContent = 'How far to…';
+    $('target-sub').textContent = 'Set the distance, then throw';
+    showPhase('distance');
+    refreshDistance();
+  }
+
+  // ── DISTANCE: warped slider (more travel for nearer distances) ─────────────
+  // Slider 0-1000 → km, piecewise-linear:
+  //   0-333  → 0-2,000 km      (~6 km per step: city-scale precision)
+  //   333-667 → 2,000-20,000   (~54 km per step)
+  //   667-1000 → 20,000-40,000 (~60 km per step)
+  var WARP = [[0, 0], [333, 2000], [667, 20000], [1000, 40000]];
+  function sliderToKm(v) {
+    for (var i = 1; i < WARP.length; i++) {
+      if (v <= WARP[i][0]) {
+        var a = WARP[i - 1], b = WARP[i];
+        return a[1] + (b[1] - a[1]) * (v - a[0]) / (b[0] - a[0]);
+      }
+    }
+    return MAX_KM;
+  }
+
+  function refreshDistance() {
+    $('distance-km').textContent = fmtKm(state.distKm);
+  }
+  function onSlider() {
+    if (!state) return;
+    state.distKm = Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25;
+    refreshDistance();
+  }
+  function nudgeDist(dir) {
+    return function (mult) {
+      if (!state || state.phase !== 'distance') return;
+      state.distKm = Math.min(MAX_KM, Math.max(0, state.distKm + dir * 25 * mult));
+      refreshDistance();
+    };
+  }
+
+  // ── THROW → REVEAL ──────────────────────────────────────────────────────────
+  function throwDart() {
+    if (!state || state.phase !== 'distance') return;
+    var t = state.targets[state.idx];
+    state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
+    state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
+    state.points = scoreFor(state.gapKm);
+    state.phase = 'reveal';
+    $('target-kicker').textContent = 'The throw…';
+    $('target-sub').textContent = '';
+    showPhase('reveal');
+
+    globe.playReveal({
+      origin: state.origin,
+      heading: state.headingAtLock,
+      bearing: state.bearing,
+      distKm: state.distKm,
+      landing: state.landing,
+      target: { lat: t[1], lon: t[2], emoji: t[3], name: t[0] },
+      gapKm: state.gapKm,
+      tier: tierFor(state.points)
+    }, {
+      caption: function (text) { $('globe-caption').textContent = text; },
+      done: function () { showScore(); }
+    });
+  }
+
+  function showScore() {
+    if (!state || state.phase !== 'reveal') return;
+    state.phase = 'score';
+    state.scores.push(state.points);
+    var t = state.targets[state.idx];
+    var tier = tierFor(state.points);
+
+    $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
+      (state.points === 1 ? ' point' : ' points');
+    $('verdict').className = 'tn-verdict ' + tier;
+    $('result-detail').textContent =
+      'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '. ' +
+      '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
+    refreshStatus();
+    showPhase('score');
+
+    if (state.idx + 1 < ROUNDS) {
+      $('next-btn').hidden = false;
+    } else {
+      finishGame();
+    }
+  }
+
+  function finishGame() {
+    var total = totalScore();
+    var tier = total >= 3500 ? 'good' : (total >= 1500 ? 'warn' : 'bad');
+    var line = total >= 4500 ? 'World-class darts.'
+             : total >= 3500 ? 'Impressive geography!'
+             : total >= 2500 ? 'Solid arm.'
+             : total >= 1500 ? 'The Earth is big, eh?'
+             : 'The ocean thanks you for the darts.';
+    $('verdict').textContent = 'Final: ' + total + ' / 5000 — ' + line;
+    $('verdict').className = 'tn-verdict ' + tier;
+    $('again-btn').hidden = false;
+  }
+
   // ── Location + game start ───────────────────────────────────────────────────
+  var LAST_FIX_KEY = 'tn.lastFix';
   function locate() {
     return new Promise(function (resolve, reject) {
       if (!navigator.geolocation) { reject(new Error('no geolocation')); return; }
       navigator.geolocation.getCurrentPosition(
-        function (pos) { resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }); },
+        function (pos) {
+          var fix = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          try { localStorage.setItem(LAST_FIX_KEY, JSON.stringify(fix)); } catch (_) {}
+          resolve(fix);
+        },
         function (err) { reject(err); },
         { enableHighAccuracy: false, timeout: 12000, maximumAge: 600000 }
       );
     });
+  }
+  function lastFix() {
+    try {
+      var raw = localStorage.getItem(LAST_FIX_KEY);
+      if (!raw) return null;
+      var fix = JSON.parse(raw);
+      return (typeof fix.lat === 'number' && typeof fix.lon === 'number') ? fix : null;
+    } catch (_) { return null; }
   }
 
   function geoErrorText(err) {
@@ -308,6 +426,24 @@
     return 'Couldn’t determine your location (' + ((err && err.message) || 'unavailable') + '). Tap Start to retry.';
   }
 
+  function beginGame(origin, note) {
+    state = {
+      phase: 'aim',
+      origin: origin,
+      targets: pickTargets(origin),
+      idx: 0,
+      scores: [],
+      needleAngle: 0,
+      headingAtLock: 0,
+      distKm: sliderToKm(Number($('distance-slider').value)),
+      landing: null, gapKm: 0, points: 0
+    };
+    $('start-btn').hidden = true;
+    $('start-btn').disabled = false;
+    showRound();
+    if (note) $('mode-note').textContent = note;
+  }
+
   function startGame() {
     $('start-btn').disabled = true;
     $('mode-note').textContent = 'Requesting compass access…';
@@ -319,13 +455,13 @@
       $('mode-note').textContent = 'Finding where you are…';
       return locate();
     }).then(function (origin) {
-      state = { origin: origin, targets: pickTargets(origin), idx: 0, errors: [], locked: false };
-      $('start-btn').hidden = true;
-      $('start-btn').disabled = false;
-      $('avg-error').textContent = '–';
-      refreshModeHints();
-      showRound();
+      beginGame(origin, null);
     }).catch(function (err) {
+      var cached = lastFix();
+      if (cached) {
+        beginGame(cached, 'Using your last known location — allow location access for a fresh fix.');
+        return;
+      }
       $('start-btn').disabled = false;
       $('start-btn').textContent = 'Try again';
       $('mode-note').textContent = geoErrorText(err);
@@ -334,13 +470,12 @@
 
   // ── Boot ────────────────────────────────────────────────────────────────────
   function buildTicks() {
+    // Uniform anonymous ticks — nothing may hint at a cardinal direction.
     var g = $('ticks'), html = '';
     for (var d = 0; d < 360; d += 15) {
-      var main = d % 90 === 0, mid = d % 45 === 0;
-      var len = main ? 14 : (mid ? 10 : 6);
       var a = d * R;
       var x1 = 120 + Math.sin(a) * 104, y1 = 120 - Math.cos(a) * 104;
-      var x2 = 120 + Math.sin(a) * (104 - len), y2 = 120 - Math.cos(a) * (104 - len);
+      var x2 = 120 + Math.sin(a) * 96, y2 = 120 - Math.cos(a) * 96;
       html += '<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) +
               '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '"/>';
     }
@@ -350,29 +485,57 @@
   document.addEventListener('DOMContentLoaded', function () {
     compassEl = $('compass');
     needleYou = $('needle-you');
-    needleTrue = $('needle-true');
-    liveEl = $('live-readout');
-    holdHint = $('hold-hint');
     buildTicks();
     installAimHandlers();
+    globe = TNGlobe.create($('globe'));
+
+    // ?heading=NN fakes a device heading so the orientation math is testable
+    // in a desktop browser (which has no compass).
+    var fake = new URLSearchParams(location.search).get('heading');
+    if (fake != null && !isNaN(parseFloat(fake))) {
+      sensor.fake = ((parseFloat(fake) % 360) + 360) % 360;
+    }
+
     // No leaderboard (yet) — the canonical topbar ships the button visible.
     var lb = $('lbButton'); if (lb) lb.hidden = true;
+
     $('start-btn').addEventListener('click', startGame);
-    $('next-btn').addEventListener('click', function () { state.idx++; showRound(); });
+    $('lock-btn').addEventListener('click', lockDirection);
+    $('throw-btn').addEventListener('click', throwDart);
+    $('globe').addEventListener('click', function () { globe.skip(); });
+    $('distance-slider').addEventListener('input', onSlider);
+    holdRepeat($('aim-minus'), nudgeAim(-1));
+    holdRepeat($('aim-plus'), nudgeAim(1));
+    holdRepeat($('dist-minus'), nudgeDist(-1));
+    holdRepeat($('dist-plus'), nudgeDist(1));
+
+    $('next-btn').addEventListener('click', function () {
+      state.idx++;
+      state.phase = 'aim';
+      globe.stop();
+      showRound();
+    });
     $('again-btn').addEventListener('click', function () {
       state = null;
+      globe.stop();
       $('start-btn').hidden = false;
+      $('start-btn').textContent = 'Start';
       $('round-num').textContent = '–';
-      $('avg-error').textContent = '–';
+      $('score-total').textContent = '–';
       $('target-name').textContent = '…';
+      $('target-card').hidden = false;
       $('result').hidden = true;
       $('again-btn').hidden = true;
+      showPhase('idle');
       startGame();
     });
+
     // Help modal (canonical chrome pair; arcade.js binds Escape)
     var help = $('help-modal');
     $('helpButton') && $('helpButton').addEventListener('click', function () { help.hidden = false; });
     $('help-close').addEventListener('click', function () { help.hidden = true; });
     help.addEventListener('click', function (e) { if (e.target === help) help.hidden = true; });
+
+    showPhase('idle');
   });
 })();
