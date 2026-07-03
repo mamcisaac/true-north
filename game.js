@@ -5,6 +5,13 @@
 (function () {
   'use strict';
 
+  // Phones have no console — surface any uncaught error on the page so
+  // "it doesn't work" is at least diagnosable.
+  window.addEventListener('error', function (e) {
+    var el = document.getElementById('mode-note');
+    if (el) el.textContent = 'Something broke: ' + (e.message || 'unknown error');
+  });
+
   // ── Places (name, lat, lon, emoji) ─────────────────────────────────────────
   var PLACES = [
     ['Tokyo', 35.68, 139.69, '🗼'], ['Paris', 48.86, 2.35, '🗼'],
@@ -246,7 +253,11 @@
 
   function installAimHandlers() {
     compassEl.addEventListener('pointerdown', function (ev) {
-      if (!state || state.locked) return;
+      if (!state) { // holding before Start shouldn't feel like a dead screen
+        liveEl.textContent = 'Tap Start first';
+        return;
+      }
+      if (state.locked) return;
       ev.preventDefault();
       try { compassEl.setPointerCapture(ev.pointerId); } catch (_) { /* synthetic/stale pointer */ }
       compassEl.classList.add('is-aiming');
@@ -286,23 +297,38 @@
     });
   }
 
+  function geoErrorText(err) {
+    // Name the actual problem — a generic message reads as "broken".
+    if (err && err.code === 1) {
+      return 'Location is blocked for this site. Allow it (iPhone: Settings → Privacy → Location Services → Safari Websites) and tap Start again.';
+    }
+    if (err && err.code === 3) {
+      return 'Couldn’t get a location fix in time — try again near a window or outside.';
+    }
+    return 'Couldn’t determine your location (' + ((err && err.message) || 'unavailable') + '). Tap Start to retry.';
+  }
+
   function startGame() {
     $('start-btn').disabled = true;
-    $('mode-note').textContent = 'Finding where you are…';
-    startSensors(); // ride the Start tap for the iOS sensor prompt too
-    locate().then(function (origin) {
+    $('mode-note').textContent = 'Requesting compass access…';
+    // iOS shows one permission dialog at a time and the motion prompt MUST
+    // ride the tap — so sequence: compass permission first (await it), then
+    // the location prompt. Firing both at once left geolocation hanging
+    // behind the motion dialog until its timeout, which looked frozen.
+    startSensors().then(function () {
+      $('mode-note').textContent = 'Finding where you are…';
+      return locate();
+    }).then(function (origin) {
       state = { origin: origin, targets: pickTargets(origin), idx: 0, errors: [], locked: false };
       $('start-btn').hidden = true;
       $('start-btn').disabled = false;
       $('avg-error').textContent = '–';
-      $('mode-note').textContent = (sensor.mode === 'dial')
-        ? 'No compass detected — drag the dial to aim.'
-        : 'Compass mode — physically point your phone.';
+      refreshModeHints();
       showRound();
-    }).catch(function () {
+    }).catch(function (err) {
       $('start-btn').disabled = false;
-      $('mode-note').textContent =
-        'True North needs your location to compute real directions — allow location access and try again.';
+      $('start-btn').textContent = 'Try again';
+      $('mode-note').textContent = geoErrorText(err);
     });
   }
 
