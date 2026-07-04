@@ -21,6 +21,6 @@ measures how far it landed from the true spot. Up to 1000 points per round
   world-atlas@2, converted to `world-land.js` at vendoring time.
 
 Part of the [Connect the Thoughts](https://connectthethoughts.ca/) arcade.
-Static, no build step. Shared assets (`tokens.css`, `chrome.css`, `arcade.js`,
+Static, no build step. Shared assets (`tokens.css`, `chrome.css`, `arcade-theme.js`,
 the topbar block) are vended from the hub repo — edit them there and run
 `connectthethoughts/scripts/sync-shared.mjs`.

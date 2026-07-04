@@ -530,7 +530,7 @@
       startGame();
     });
 
-    // Help modal (canonical chrome pair; arcade.js binds Escape)
+    // Help modal (canonical chrome pair; arcade-theme.js binds Escape)
     var help = $('help-modal');
     $('helpButton') && $('helpButton').addEventListener('click', function () { help.hidden = false; });
     $('help-close').addEventListener('click', function () { help.hidden = true; });
