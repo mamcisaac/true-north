@@ -6,29 +6,36 @@
   <meta name="description" content="Set your phone down, spin the needle toward a real place, pick a distance, and throw a dart around the globe. Part of the Connect the Thoughts arcade.">
   <title>True North — Connect the Thoughts</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="chrome.css">
+  <link rel="stylesheet" href="tokens.css?v=5fdea8ed">
+  <link rel="stylesheet" href="chrome.css?v=55fe8f85">
   <link rel="stylesheet" href="styles.css">
-  <script>
-    // Pre-paint theme bootstrap — URL param > localStorage > system.
-    (function () {
-      try {
-        var url = new URLSearchParams(location.search).get('theme');
-        if (url === 'dark' || url === 'light') localStorage.setItem('ctt.theme', url);
-      } catch (_) {}
-      var s = null; try { s = localStorage.getItem('ctt.theme'); } catch (_) {}
-      document.documentElement.setAttribute('data-theme', s || 'dark');
-    })();
-  </script>
-  <script src="arcade-theme.js" defer></script>
+  <!-- arcade:theme-boot:start -->
+<script>
+  // Pre-paint theme bootstrap (sync-managed — edit in hub shared/, never here).
+  // URL param > saved ctt.theme > dark. The ?theme= read is what carries the
+  // theme across origins (hub → game); the localStorage read is what keeps
+  // every game on the SAME theme (all games share one origin).
+  (function () {
+    try {
+      var url = new URLSearchParams(location.search).get('theme');
+      if (url === 'dark' || url === 'light') localStorage.setItem('ctt.theme', url);
+    } catch (_) {}
+    var s = null;
+    try { s = localStorage.getItem('ctt.theme'); } catch (_) {}
+    document.documentElement.setAttribute('data-theme', s || 'dark');
+  })();
+</script>
+<!-- arcade:theme-boot:end -->
+  <script src="arcade-theme.js?v=98232ec8" defer></script>
   <script src="world-land.js" defer></script>
   <script src="globe.js" defer></script>
+  <script src="arcade-tutorial.js?v=511b18f1" defer></script>
   <script src="game.js" defer></script>
 </head>
 <body>
   <!-- arcade:topbar:start -->
 <header class="topbar">
-  <a class="brand" href="https://connectthethoughts.ca/" aria-label="Connect the Thoughts — arcade home">
+  <a class="brand" data-arcade-pass-theme href="https://connectthethoughts.ca/" aria-label="Connect the Thoughts — arcade home">
     <span class="brand-mark" aria-hidden="true">
       <svg viewBox="0 0 32 32" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="7" cy="8" r="2.5"/><circle cx="25" cy="8" r="2.5"/>

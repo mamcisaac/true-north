@@ -536,6 +536,27 @@
     $('help-close').addEventListener('click', function () { help.hidden = true; });
     help.addEventListener('click', function (e) { if (e.target === help) help.hidden = true; });
 
+    // First-play tutorial — shared carousel; fires once, re-openable from the rules modal.
+    if (window.ArcadeTutorial) {
+      var TUTORIAL_STEPS = [
+        {
+          title: 'Aim by feel',
+          body: 'A real place is named. <b>Drag the needle</b> to point the direction you think it lies — your phone secretly reads the compass, but north is never shown.',
+        },
+        {
+          title: 'Guess the distance',
+          body: 'Lock your direction, then <b>set how far away it is</b> — up to 40,000 km, all the way around the world — and throw.',
+        },
+        {
+          title: 'Watch the dart land',
+          body: 'The globe reveals your throw. The closer your dart lands to the real spot, the more points you score — up to 1000 per round, five rounds a game.',
+        },
+      ];
+      var tutorial = window.ArcadeTutorial.createTutorial({ gameSlug: 'true-north', steps: TUTORIAL_STEPS });
+      tutorial.wire();
+      tutorial.maybeAutoStart();
+    }
+
     showPhase('idle');
   });
 })();
