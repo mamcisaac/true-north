@@ -205,7 +205,10 @@
       resize();
       beginFrame();
       var colors = {
-        ocean: cssVar('--bg-elev', '#131b2e'),
+        // Ocean must read as WATER against the page — the Penny Arcade elevation
+        // is near-cream, so key off the navy tone (navy in light / blue in dark)
+        // for a proper map globe instead of a washed cream-on-cream disc.
+        ocean: cssVar('--tone-sky-fg', '#33628f'),
         land: cssVar('--border-strong', '#334155'),
         graticule: cssVar('--border', '#1e293b'),
         accent: cssVar('--accent', '#5eead4'),
