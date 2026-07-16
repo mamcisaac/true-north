@@ -210,7 +210,11 @@
 
   function showRound() {
     var t = state.targets[state.idx];
-    state.needleAngle = Math.floor(Math.random() * 360); // random start — no anchor hint
+    // Round 1 has no prior aim, so start at a random angle (no anchor hint).
+    // Later rounds keep the last round's needle so players build off it — the
+    // angle is screen-relative and the flat phone's heading is unchanged, so
+    // the same screen angle still points the same real-world direction.
+    if (state.idx === 0) state.needleAngle = Math.floor(Math.random() * 360);
     setNeedle(state.needleAngle);
     $('target-kicker').textContent = 'Which way to…';
     $('target-name').textContent = t[3] + ' ' + t[0];
