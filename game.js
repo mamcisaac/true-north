@@ -171,6 +171,70 @@
     return a.slice(0, ROUNDS);
   }
 
+  // ── Daily targets ────────────────────────────────────────────────────────────
+  // The DAILY serves the SAME five places to everyone that day (origin stays the
+  // player's real location, so the true bearing/distance still differ per player —
+  // that's the game). Deterministic: seed a PRNG from the shared daily date key
+  // (archive-aware via ArcadeDailySeed) salted with the game slug, shuffle the
+  // full PLACES list, take five. No origin-distance filter — that would make the
+  // list differ per player and break the shared board.
+  function pickDailyTargets() {
+    var DS = window.ArcadeDailySeed;
+    var rnd = DS.mulberry32(DS.seedFromKey(DS.dailyDateKey(), 'true-north'));
+    var a = PLACES.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(rnd() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a.slice(0, ROUNDS);
+  }
+
+  // Smallest absolute angular difference between two bearings (0-180°).
+  function bearingGap(a, b) {
+    var d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  }
+
+  // ── Mode + shared leaderboard glue ───────────────────────────────────────────
+  // gameMode: 'daily' (seeded, shared board, scored) | 'free' (random, unscored).
+  // Boot into Daily (arcade daily convention).
+  var gameMode = 'daily';
+  var LB = window.ArcadeLeaderboard || null;
+  var LB_GAME = 'true-north';
+  var lbHandle = LB && LB.loadSharedHandle ? LB.loadSharedHandle(LB_GAME) : '';
+  var lbUi = null; // shared modal, built at boot when the backend is configured
+
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
+
+  // Archive-aware daily board key: "YYYY-M-D|daily" for (played day − offset).
+  function boardKeyForOffset(offset) {
+    var d = window.ArcadeDailySeed.dailyDate();
+    d.setDate(d.getDate() - offset);
+    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate() + '|daily';
+  }
+
+  // The ranked metric is TOTAL BEARING ERROR in whole degrees (lower is better).
+  function totalDegrees() {
+    return state ? state.bearingErrors.reduce(function (s, x) { return s + x; }, 0) : 0;
+  }
+  // Map a board row / history entry onto its degrees value (for compare + display).
+  function lbVal(e) {
+    if (!e) return Infinity;
+    if (e.value != null) return e.value;
+    if (e.degrees != null) return e.degrees;
+    return Infinity;
+  }
+  function lbRowDegrees(r) {
+    var m = r.meta || {};
+    if (m.degrees != null) return Math.round(m.degrees);
+    return Math.round(Number(r.score));
+  }
+  function lbBestDegrees(best) {
+    return Math.round(best.degrees != null ? best.degrees : (best.value != null ? best.value : 0));
+  }
+  function lbCell(deg) { return deg + '°'; }
+
   // ── Scoring ─────────────────────────────────────────────────────────────────
   function scoreFor(gapKm) {
     if (gapKm <= 25) return 1000;
@@ -219,8 +283,8 @@
     $('target-kicker').textContent = 'Which way to…';
     $('target-name').textContent = t[3] + ' ' + t[0];
     $('target-sub').textContent = 'Spin the needle, then lock it in';
-    $('next-btn').hidden = true;
-    $('again-btn').hidden = true;
+    $('tn-next-btn').hidden = true;
+    $('tn-again-btn').hidden = true;
     $('mode-note').textContent = sensor.hasCompass || sensor.fake != null
       ? 'Keep your phone flat and still.'
       : 'No compass — the top of the screen counts as north.';
@@ -338,6 +402,9 @@
     state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
     state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
     state.points = scoreFor(state.gapKm);
+    // Ranked metric: how far off the aim was, in whole degrees, vs the true bearing.
+    var trueBearing = bearingTo(state.origin.lat, state.origin.lon, t[1], t[2]);
+    state.bearingGapDeg = Math.round(bearingGap(state.bearing, trueBearing));
     state.phase = 'reveal';
     $('target-kicker').textContent = 'The throw…';
     $('target-sub').textContent = '';
@@ -362,6 +429,7 @@
     if (!state || state.phase !== 'reveal') return;
     state.phase = 'score';
     state.scores.push(state.points);
+    state.bearingErrors.push(state.bearingGapDeg);
     var t = state.targets[state.idx];
     var tier = tierFor(state.points);
 
@@ -370,18 +438,20 @@
     $('verdict').className = 'tn-verdict ' + tier;
     $('result-detail').textContent =
       'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '. ' +
+      'Your aim was ' + state.bearingGapDeg + '° off. ' +
       '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
     refreshStatus();
     showPhase('score');
 
     if (state.idx + 1 < ROUNDS) {
-      $('next-btn').hidden = false;
+      $('tn-next-btn').hidden = false;
     } else {
       finishGame();
     }
   }
 
   function finishGame() {
+    if (state.mode === 'daily') { finishDaily(); return; }
     var total = totalScore();
     var tier = total >= 3500 ? 'good' : (total >= 1500 ? 'warn' : 'bad');
     var line = total >= 4500 ? 'World-class darts.'
@@ -391,7 +461,125 @@
              : 'The ocean thanks you for the darts.';
     $('verdict').textContent = 'Final: ' + total + ' / 5000 — ' + line;
     $('verdict').className = 'tn-verdict ' + tier;
-    $('again-btn').hidden = false;
+    $('tn-again-btn').hidden = false;
+  }
+
+  // ── Daily finish: shared results card + leaderboard submit ────────────────────
+  function finishDaily() {
+    var deg = totalDegrees();
+    var archiving = !!(window.ArcadeArchive && window.ArcadeArchive.isArchiving());
+    var scored = state.scored && !archiving;
+    var dayKey = window.ArcadeDailySeed.dailyDateKey();
+    var doneKey = 'tn.daily.done|' + dayKey;
+
+    // Record local history once per day (drives the "You" tab, streaks, and the
+    // archive's ✓ done-mark). Only for a live, scored first play.
+    if (scored && LB && LB.recordHistory && !lsGet(doneKey)) {
+      LB.recordHistory(LB_GAME, { date: dayKey, difficulty: 'daily', value: deg, degrees: deg });
+      if (LB.reportStats) LB.reportStats(LB_GAME);
+    }
+
+    // Hide the in-round panels; the shared card takes over.
+    $('target-card').hidden = true;
+    $('result').hidden = true;
+    showPhase('final');
+
+    var mount = $('results');
+    var subHtml = archiving
+      ? 'Practice replay — past dailies aren\'t scored.'
+      : scored
+        ? 'Total bearing error across five places — lower is better.'
+        : 'Daily needs your location to rank — you played unscored.';
+
+    if (window.ArcadeResults && window.ArcadeResults.renderResults) {
+      window.ArcadeResults.renderResults({
+        mount: mount,
+        headline: 'Daily complete!',
+        statHtml: deg + '<small>° total bearing error</small>',
+        subHtml: subHtml,
+        dailyComplete: scored,
+        gameSlug: LB_GAME,
+        shareLabel: 'Share',
+        onShare: function () { shareDaily(deg); },
+        nextLabel: archiving ? "Back to today's daily" : 'Free play',
+        onNext: function () {
+          if (window.ArcadeArchive && window.ArcadeArchive.isArchiving()) setMode('daily');
+          else setMode('free');
+        },
+      });
+      mount.hidden = false;
+      var lbMount = mount.querySelector('#lb-inline');
+      if (lbMount) {
+        if (!LB || !LB.isLeaderboardConfigured || !LB.isLeaderboardConfigured()) {
+          lbMount.innerHTML = '';
+        } else if (archiving) {
+          lbMount.innerHTML = '<div class="lb-status">Practice replay — past dailies aren\'t scored.</div>';
+        } else if (!scored) {
+          lbMount.innerHTML = '<div class="lb-status">Daily needs your location to rank — playing unscored.</div>';
+        } else {
+          lbRenderWin(lbMount, deg, doneKey);
+        }
+      }
+      try { mount.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+    } else {
+      // Fallback if the shared results module didn't load.
+      $('verdict').textContent = 'Daily complete — ' + deg + '° total bearing error.';
+      $('verdict').className = 'tn-verdict good';
+      $('result').hidden = false;
+      $('tn-again-btn').hidden = false;
+    }
+  }
+
+  // Submit the daily result (once per day) then render the standing. If we've
+  // already submitted today, just show the board.
+  function lbRenderWin(mount, deg, doneKey) {
+    var board = boardKeyForOffset(0);
+    function showBoard(name) {
+      if (lbUi) lbUi.renderBoard(mount, board, name || null);
+      else mount.innerHTML = '';
+    }
+    function doSubmit(name) {
+      mount.innerHTML = '<div class="lb-status">Submitting…</div>';
+      LB.submitMetricCompletion({
+        game: LB_GAME, difficulty: 'daily', value: deg, handle: name,
+        board: board, meta: { degrees: deg }, alltimeVersion: 1
+      }).then(function (ok) {
+        if (ok) lsSet(doneKey, '1');
+        showBoard(name);
+      }).catch(function () { showBoard(name); });
+    }
+    if (lsGet(doneKey)) { showBoard(lbHandle); return; }   // already scored today
+    if (lbHandle) { doSubmit(lbHandle); return; }
+    // No handle yet — collect one before the first submit.
+    mount.innerHTML = '<div class="lb-join"><div class="lb-join-title">🏆 Join today\'s leaderboard</div>' +
+      '<div class="lb-join-row"><input id="lb-handle-input" class="lb-input" type="text" maxlength="24" placeholder="Your name" autocomplete="off" />' +
+      '<button id="lb-handle-submit" class="tn-btn tn-btn-primary" type="button">Submit</button></div></div>';
+    var input = mount.querySelector('#lb-handle-input');
+    var btn = mount.querySelector('#lb-handle-submit');
+    if (input) input.focus();
+    if (btn) btn.addEventListener('click', function () {
+      var name = LB.cleanHandle(input ? input.value : '');
+      if (!name) { if (input) input.focus(); return; }
+      lbHandle = LB.saveSharedHandle(name);
+      doSubmit(name);
+    });
+    if (input) input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { var b = mount.querySelector('#lb-handle-submit'); if (b) b.click(); }
+    });
+  }
+
+  function shareDaily(deg) {
+    var dateLabel = boardKeyForOffset(0).replace('|daily', '');
+    var text = 'True North · Daily ' + dateLabel + '\n' + deg + '° total bearing error\n' +
+      'connectthethoughts.ca/true-north';
+    if (navigator.share) {
+      navigator.share({ title: 'True North', text: text }).catch(function () {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function () {
+        var b = document.getElementById('share-btn');
+        if (b) { var o = b.textContent; b.textContent = 'Copied!'; setTimeout(function () { b.textContent = o; }, 2000); }
+      }).catch(function () {});
+    }
   }
 
   // ── Location + game start ───────────────────────────────────────────────────
@@ -430,18 +618,25 @@
     return 'Couldn’t determine your location (' + ((err && err.message) || 'unavailable') + '). Tap Start to retry.';
   }
 
-  function beginGame(origin, note) {
+  function beginGame(origin, note, originIsReal) {
+    var archiving = !!(window.ArcadeArchive && window.ArcadeArchive.isArchiving());
     state = {
       phase: 'aim',
+      mode: gameMode,
       origin: origin,
-      targets: pickTargets(origin),
+      // Daily scores only on a live (non-archive) daily played from a REAL
+      // geolocation fix — otherwise the shared board wouldn't be fair.
+      scored: gameMode === 'daily' && !!originIsReal && !archiving,
+      targets: gameMode === 'daily' ? pickDailyTargets() : pickTargets(origin),
       idx: 0,
       scores: [],
+      bearingErrors: [],
       needleAngle: 0,
       headingAtLock: 0,
       distKm: sliderToKm(Number($('distance-slider').value)),
-      landing: null, gapKm: 0, points: 0
+      landing: null, gapKm: 0, points: 0, bearingGapDeg: 0
     };
+    var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = true;
     $('start-btn').disabled = false;
     showRound();
@@ -459,17 +654,58 @@
       $('mode-note').textContent = 'Finding where you are…';
       return locate();
     }).then(function (origin) {
-      beginGame(origin, null);
+      beginGame(origin, null, true); // real fix → daily is scored
     }).catch(function (err) {
       var cached = lastFix();
       if (cached) {
-        beginGame(cached, 'Using your last known location — allow location access for a fresh fix.');
+        // A cached fix is still the player's real location → daily stays scored.
+        beginGame(cached, 'Using your last known location — allow location access for a fresh fix.', true);
+        return;
+      }
+      // No location at all. Daily still lets you PLAY (unscored — the shared board
+      // needs a real origin to rank fairly). Free-play genuinely needs an origin,
+      // so it keeps the retry prompt.
+      if (gameMode === 'daily') {
+        beginGame(FALLBACK_ORIGIN, 'Daily needs your location to rank — playing unscored.', false);
         return;
       }
       $('start-btn').disabled = false;
       $('start-btn').textContent = 'Try again';
       $('mode-note').textContent = geoErrorText(err);
     });
+  }
+
+  // Neutral origin for unscored daily play when no location is available.
+  var FALLBACK_ORIGIN = { lat: 0, lon: 0 };
+
+  // Reset to the pre-game idle screen (no auto-start).
+  function resetToIdle() {
+    state = null;
+    if (globe) globe.stop();
+    var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
+    $('start-btn').hidden = false;
+    $('start-btn').disabled = false;
+    $('start-btn').textContent = 'Start';
+    $('round-num').textContent = '–';
+    $('score-total').textContent = '–';
+    $('target-name').textContent = '…';
+    $('target-card').hidden = false;
+    $('result').hidden = true;
+    $('tn-next-btn').hidden = true;
+    $('tn-again-btn').hidden = true;
+    $('mode-note').textContent = '';
+    showPhase('idle');
+  }
+
+  // Switch Daily / Free-play. Always leaves any archive replay and returns to
+  // idle so the next Start serves the chosen mode.
+  function setMode(mode) {
+    if (window.ArcadeArchive) window.ArcadeArchive.exitArchive();
+    gameMode = mode;
+    var md = $('mode-daily'), mr = $('mode-free');
+    if (md) md.classList.toggle('active', mode === 'daily');
+    if (mr) mr.classList.toggle('active', mode === 'free');
+    resetToIdle();
   }
 
   // ── Boot ────────────────────────────────────────────────────────────────────
@@ -500,8 +736,53 @@
       sensor.fake = ((parseFloat(fake) % 360) + 360) % 360;
     }
 
-    // No leaderboard (yet) — the canonical topbar ships the button visible.
-    var lb = $('lbButton'); if (lb) lb.hidden = true;
+    // ── Shared leaderboard modal (single daily board, bearing-error metric) ────
+    if (LB && window.ArcadeLeaderboardUI && LB.isLeaderboardConfigured && LB.isLeaderboardConfigured()) {
+      lbUi = window.ArcadeLeaderboardUI.createLeaderboardModal({
+        gameSlug: LB_GAME,
+        getHandle: function () { return lbHandle; },
+        boardKeyForOffset: function (offset) { return boardKeyForOffset(offset); },
+        baseDateKey: function () { return window.ArcadeDailySeed.dailyDateKey(); },
+        alltimeKey: 'daily',
+        alltimeVersion: 1,
+        // Lower degrees wins, so a candidate is better when its value is smaller.
+        bestComparator: function (e, cur) { return lbVal(e) < lbVal(cur); },
+        youStats: { metricLabel: 'Bearing error', buckets: [
+          { label: 'Under 60°', max: 60 },
+          { label: '60–119°', max: 119 },
+          { label: '120–239°', max: 239 },
+          { label: '240°+' },
+        ] },
+        rowStat: function (r) { return lbCell(lbRowDegrees(r)); },
+        youRow: function (best) { return lbCell(lbBestDegrees(best)); },
+      });
+      lbUi.wire();
+    } else {
+      var lb = $('lbButton'); if (lb) lb.hidden = true;
+    }
+
+    // ── Past dailies (archive) — replay a prior day's seeded targets (practice) ──
+    if (window.ArcadeArchive) {
+      var archive = window.ArcadeArchive.createArchive({
+        isDayDone: function (key) {
+          return !!(LB && LB.loadHistory && LB.loadHistory(LB_GAME).some(function (h) { return h.date === key; }));
+        },
+        loadDailyForDate: function (key) {
+          window.ArcadeArchive.enterArchiveDate(key); // seeds pickDailyTargets + board keys for that day
+          gameMode = 'daily';
+          var md = $('mode-daily'), mr = $('mode-free');
+          if (md) md.classList.add('active');
+          if (mr) mr.classList.remove('active');
+          resetToIdle();
+          startGame(); // re-locate (origin) and play the archived day's five places
+        },
+      });
+      archive.wire();
+    }
+
+    // ── Daily / Free-play toggle ───────────────────────────────────────────────
+    $('mode-daily') && $('mode-daily').addEventListener('click', function () { setMode('daily'); });
+    $('mode-free') && $('mode-free').addEventListener('click', function () { setMode('free'); });
 
     $('start-btn').addEventListener('click', startGame);
     $('lock-btn').addEventListener('click', lockDirection);
@@ -513,24 +794,14 @@
     holdRepeat($('dist-minus'), nudgeDist(-1));
     holdRepeat($('dist-plus'), nudgeDist(1));
 
-    $('next-btn').addEventListener('click', function () {
+    $('tn-next-btn').addEventListener('click', function () {
       state.idx++;
       state.phase = 'aim';
       globe.stop();
       showRound();
     });
-    $('again-btn').addEventListener('click', function () {
-      state = null;
-      globe.stop();
-      $('start-btn').hidden = false;
-      $('start-btn').textContent = 'Start';
-      $('round-num').textContent = '–';
-      $('score-total').textContent = '–';
-      $('target-name').textContent = '…';
-      $('target-card').hidden = false;
-      $('result').hidden = true;
-      $('again-btn').hidden = true;
-      showPhase('idle');
+    $('tn-again-btn').addEventListener('click', function () {
+      resetToIdle();
       startGame();
     });
 

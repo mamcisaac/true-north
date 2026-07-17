@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="tokens.css?v=afb6be16">
   <link rel="stylesheet" href="chrome.css?v=20a1e1d2">
+  <link rel="stylesheet" href="arcade-components.css?v=b06e6912">
   <link rel="stylesheet" href="styles.css">
   <!-- arcade:theme-boot:start -->
 <script>
@@ -30,6 +31,15 @@
   <script src="world-land.js" defer></script>
   <script src="globe.js?v=2" defer></script>
   <script src="arcade-tutorial.js?v=511b18f1" defer></script>
+  <!-- Shared leaderboard / daily / archive / results modules. Order matters:
+       leaderboard before its UI; archive before daily-seed (daily-seed reads
+       window.ArcadeArchive at load). All defer, so they run in document order
+       before game.js and before DOMContentLoaded. -->
+  <script src="arcade-leaderboard.js?v=b51ccf77" defer></script>
+  <script src="arcade-leaderboard-ui.js?v=442a5b1b" defer></script>
+  <script src="arcade-results.js?v=2bda31d9" defer></script>
+  <script src="arcade-archive.js?v=453c6a8d" defer></script>
+  <script src="arcade-daily-seed.js?v=5b6d533a" defer></script>
   <script src="game.js" defer></script>
 </head>
 <body>
@@ -76,6 +86,11 @@
 <!-- arcade:topbar:end -->
 
   <main class="tn-main">
+
+    <div class="mode-toggle tn-mode" role="group" aria-label="Game mode">
+      <button id="mode-daily" class="mode-btn active" type="button">Daily</button>
+      <button id="mode-free" class="mode-btn" type="button">Free play</button>
+    </div>
 
     <div class="tn-status">
       <span id="round-label">Round <b id="round-num">–</b> / 5</span>
@@ -140,9 +155,12 @@
 
     <div class="tn-actions">
       <button id="start-btn" class="tn-btn tn-btn-primary" type="button">Start</button>
-      <button id="next-btn" class="tn-btn tn-btn-primary" type="button" hidden>Next place</button>
-      <button id="again-btn" class="tn-btn" type="button" hidden>Play again</button>
+      <button id="tn-next-btn" class="tn-btn tn-btn-primary" type="button" hidden>Next place</button>
+      <button id="tn-again-btn" class="tn-btn" type="button" hidden>Play again</button>
     </div>
+
+    <!-- Shared end-of-daily results card (window.ArcadeResults.renderResults) -->
+    <div id="results" class="tn-results" hidden></div>
 
     <p class="tn-note" id="mode-note"></p>
   </main>
@@ -150,6 +168,26 @@
   <footer class="arcade-footer">
     Part of <a href="https://connectthethoughts.ca/" data-arcade-pass-theme>connectthethoughts.ca</a>
   </footer>
+
+  <!-- Leaderboard modal (shared arcade-leaderboard-ui contract, single-board) -->
+  <div class="modal-backdrop" id="lb-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lb-title">
+      <button class="modal-close-x" id="lb-close" type="button" aria-label="Close">×</button>
+      <h2 id="lb-title">Leaderboard</h2>
+      <p class="lb-blurb">Ranked by total bearing error across the day's five places — how many degrees your aim was off, added up. Lower is better. The daily needs your real location to rank.</p>
+      <div class="lb-scope-tabs" id="lb-scope-tabs" role="group" aria-label="Leaderboard scope">
+        <button class="lb-scope-tab active" data-scope="today" type="button">Today</button>
+        <button class="lb-scope-tab" data-scope="alltime" type="button">All-time</button>
+        <button class="lb-scope-tab" data-scope="you" type="button">You</button>
+      </div>
+      <div class="lb-nav">
+        <button id="lb-prev" class="lb-nav-btn" type="button" aria-label="Previous day">&#x2039;</button>
+        <span id="lb-day-label">Today</span>
+        <button id="lb-next" class="lb-nav-btn" type="button" aria-label="Next day">&#x203a;</button>
+      </div>
+      <div class="lb-body" id="lb-body"></div>
+    </div>
+  </div>
 
   <div class="modal-backdrop" id="help-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
