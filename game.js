@@ -253,6 +253,21 @@
     if (points >= 100)  return 'Wide of the mark.';
     return 'Wrong side of the world!';
   }
+  // Daily headline metric is bearing error in degrees (lower is better) — its
+  // own tier + phrasing so what the player sees matches the leaderboard.
+  function tierForDeg(deg) {
+    if (deg <= 15) return 'good';
+    if (deg <= 45) return 'warn';
+    return 'bad';
+  }
+  function verdictTextDeg(deg) {
+    if (deg <= 2)  return 'DEAD ON!';
+    if (deg <= 10) return 'Razor sharp.';
+    if (deg <= 20) return 'Sharp aim.';
+    if (deg <= 35) return 'Good bearing.';
+    if (deg <= 60) return 'Off the mark.';
+    return 'Wrong way!';
+  }
 
   // ── Panels / phases ─────────────────────────────────────────────────────────
   function showPhase(phase) {
@@ -267,9 +282,18 @@
   function totalScore() {
     return state ? state.scores.reduce(function (s, x) { return s + x; }, 0) : 0;
   }
+  // Daily HUD shows running bearing error in degrees (lower is better, matching
+  // the leaderboard); free play keeps the native 0–5000 points score.
+  function statusLabelHtml(mode, valueStr) {
+    return mode === 'daily'
+      ? 'Aim off <b id="score-total">' + valueStr + '</b>°'
+      : 'Score <b id="score-total">' + valueStr + '</b> / 5000';
+  }
   function refreshStatus() {
     $('round-num').textContent = state ? String(state.idx + 1) : '–';
-    $('score-total').textContent = state ? String(totalScore()) : '–';
+    var mode = state ? state.mode : gameMode;
+    var valueStr = state ? String(mode === 'daily' ? totalDegrees() : totalScore()) : '–';
+    $('score-label').innerHTML = statusLabelHtml(mode, valueStr);
   }
 
   function showRound() {
@@ -431,15 +455,25 @@
     state.scores.push(state.points);
     state.bearingErrors.push(state.bearingGapDeg);
     var t = state.targets[state.idx];
-    var tier = tierFor(state.points);
+    var daily = state.mode === 'daily';
+    var tier = daily ? tierForDeg(state.bearingGapDeg) : tierFor(state.points);
 
-    $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
-      (state.points === 1 ? ' point' : ' points');
+    if (daily) {
+      // Headline = the ranked metric (degrees off). Distance is context.
+      $('verdict').textContent = verdictTextDeg(state.bearingGapDeg) + ' ' +
+        state.bearingGapDeg + '° off';
+      $('result-detail').textContent =
+        'Your aim was ' + state.bearingGapDeg + '° off the bearing to ' + t[0] + '. ' +
+        'The dart landed ' + fmtKm(state.gapKm) + ' km away.';
+    } else {
+      $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
+        (state.points === 1 ? ' point' : ' points');
+      $('result-detail').textContent =
+        'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '. ' +
+        'Your aim was ' + state.bearingGapDeg + '° off. ' +
+        '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
+    }
     $('verdict').className = 'tn-verdict ' + tier;
-    $('result-detail').textContent =
-      'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '. ' +
-      'Your aim was ' + state.bearingGapDeg + '° off. ' +
-      '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
     refreshStatus();
     showPhase('score');
 
@@ -687,7 +721,7 @@
     $('start-btn').disabled = false;
     $('start-btn').textContent = 'Start';
     $('round-num').textContent = '–';
-    $('score-total').textContent = '–';
+    $('score-label').innerHTML = statusLabelHtml(gameMode, '–');
     $('target-name').textContent = '…';
     $('target-card').hidden = false;
     $('result').hidden = true;
@@ -824,7 +858,7 @@
         },
         {
           title: 'Watch the dart land',
-          body: 'The globe reveals your throw. The closer your dart lands to the real spot, the more points you score — up to 1000 per round, five rounds a game.',
+          body: 'The globe reveals your throw. The daily ranks you by <b>total aim error</b> — how many degrees off your bearings were across five places — so lower is better. (Free play keeps a classic 0–5000 points score.)',
         },
       ];
       var tutorial = window.ArcadeTutorial.createTutorial({ gameSlug: 'true-north', steps: TUTORIAL_STEPS });
