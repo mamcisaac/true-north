@@ -94,7 +94,7 @@
 
     <div class="tn-status">
       <span id="round-label">Round <b id="round-num">–</b> / 5</span>
-      <span id="score-label">Aim off <b id="score-total">–</b>°</span>
+      <span id="score-label">Off by <b id="score-total">–</b> km</span>
     </div>
 
     <section class="tn-target" id="target-card">
@@ -128,9 +128,9 @@
     <!-- DISTANCE: phone stays on the table — big slider, big nudges -->
     <section class="tn-panel" id="panel-distance" hidden>
       <p class="tn-distance-readout"><b id="distance-km">8,000</b> km</p>
-      <input id="distance-slider" class="tn-slider" type="range" min="0" max="1000" step="1" value="420"
+      <input id="distance-slider" class="tn-slider" type="range" min="0" max="1000" step="1" value="400"
              aria-label="Distance in kilometres">
-      <p class="tn-slider-note">Halfway around the world is 20,000 km</p>
+      <p class="tn-slider-note">The far side of the world is 20,000 km away</p>
       <div class="tn-nudge-row">
         <button id="dist-minus" class="tn-nudge" type="button" aria-label="Less distance">−</button>
         <button id="throw-btn" class="tn-btn tn-btn-primary tn-btn-wide" type="button">Throw 🎯</button>
@@ -174,7 +174,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lb-title">
       <button class="modal-close-x" id="lb-close" type="button" aria-label="Close">×</button>
       <h2 id="lb-title">Leaderboard</h2>
-      <p class="lb-blurb">Ranked by total bearing error across the day's five places — how many degrees your aim was off, added up. Lower is better. The daily needs your real location to rank.</p>
+      <p class="lb-blurb">Ranked by total distance from the target across the day's five places — how far your darts landed from the mark, added up. Lower is better. The daily needs your real location to rank.</p>
       <div class="lb-scope-tabs" id="lb-scope-tabs" role="group" aria-label="Leaderboard scope">
         <button class="lb-scope-tab active" data-scope="today" type="button">Today</button>
         <button class="lb-scope-tab" data-scope="alltime" type="button">All-time</button>
@@ -194,8 +194,8 @@
       <button class="modal-close-x" id="help-close" type="button" aria-label="Close">×</button>
       <h2 id="help-title">How to play</h2>
       <p><strong>Lay your phone flat and don't move it.</strong> The game secretly reads your compass — but never shows you north.</p>
-      <p>A real place is named. <strong>Drag the needle</strong> to point in the real-world direction you think it lies and lock it in. Then <strong>set how far away it is</strong> — up to 40,000 km, all the way around the world — and throw.</p>
-      <p>A globe appears, oriented the way your phone is actually facing. Your dart flies your chosen direction and distance along the curve of the Earth. The <strong>daily</strong> ranks you by your total aim error — how many degrees off your bearings were across five places — so lower is better. <strong>Free play</strong> keeps a classic 0–5000 points score instead.</p>
+      <p>A real place is named. <strong>Drag the needle</strong> to point in the real-world direction you think it lies and lock it in. Then <strong>set how far away it is</strong> — up to 20,000 km, the far side of the world — and throw.</p>
+      <p>A globe appears, oriented the way your phone is actually facing. Your dart flies your chosen direction and distance along the curve of the Earth. The <strong>daily</strong> ranks you by your total distance from the target — how many km your darts landed from the mark across five places — so lower is better. <strong>Free play</strong> keeps a classic 0–5000 points score instead.</p>
       <p>On a computer (no compass), the top of the screen counts as north.</p>
     </div>
   </div>
