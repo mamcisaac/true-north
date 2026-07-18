@@ -3,11 +3,15 @@
 Lay your phone flat and don't move it. The game silently reads the device
 compass — but never shows you north. A real place is named: spin the on-screen
 needle toward where you think it lies (your guess bearing = device heading +
-needle angle), lock it, set a distance (0–40,000 km), and throw. A canvas
-globe — oriented the way your phone is physically facing — shows your dart
-flying the great-circle path for your chosen bearing and distance, then
-measures how far it landed from the true spot. Up to 1000 points per round
-(exponential falloff by landing gap), five rounds per game, 5000 max.
+needle angle), lock it, set a distance (0–20,000 km — the antipodal max, past
+which a throw just comes back the other way), and throw. A canvas globe —
+oriented the way your phone is physically facing — shows your dart flying the
+great-circle path for your chosen bearing and distance, then measures how far it
+landed from the true spot. The daily ranks by **total distance from the target**
+in km across five places (lower is better) — measured along the globe, so an aim
+180° "off" that still lands on the mark scores as the bullseye it is. Free play
+keeps a classic points score: up to 1000 per round (exponential falloff by
+landing gap), five rounds, 5000 max.
 
 - **Phone**: device compass (`webkitCompassHeading` on iOS, absolute
   `deviceorientation` elsewhere) + geolocation, both prompted on the Start tap.

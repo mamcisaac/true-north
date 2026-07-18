@@ -71,16 +71,13 @@
 
   var ROUNDS = 5;
   var MIN_KM = 100; // bearings to very nearby targets are unstable — skip them
-  var MAX_KM = 40000;
+  // The antipodal distance (π·R) is the farthest two points on Earth can be:
+  // aim past it and you're just coming back round the other side. It's the real
+  // ceiling for both the slider and the score.
+  var MAX_KM = Math.round(Math.PI * 6371); // ≈ 20,015 km
 
   // ── Geometry ────────────────────────────────────────────────────────────────
   var R = Math.PI / 180;
-  function bearingTo(lat1, lon1, lat2, lon2) {
-    var f1 = lat1 * R, f2 = lat2 * R, dl = (lon2 - lon1) * R;
-    var y = Math.sin(dl) * Math.cos(f2);
-    var x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
-    return ((Math.atan2(y, x) / R) + 360) % 360;
-  }
   function distanceKm(lat1, lon1, lat2, lon2) {
     var f1 = lat1 * R, f2 = lat2 * R;
     var df = (lat2 - lat1) * R, dl = (lon2 - lon1) * R;
@@ -189,12 +186,6 @@
     return a.slice(0, ROUNDS);
   }
 
-  // Smallest absolute angular difference between two bearings (0-180°).
-  function bearingGap(a, b) {
-    var d = Math.abs(a - b) % 360;
-    return d > 180 ? 360 - d : d;
-  }
-
   // ── Mode + shared leaderboard glue ───────────────────────────────────────────
   // gameMode: 'daily' (seeded, shared board, scored) | 'free' (random, unscored).
   // Boot into Daily (arcade daily convention).
@@ -214,26 +205,29 @@
     return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate() + '|daily';
   }
 
-  // The ranked metric is TOTAL BEARING ERROR in whole degrees (lower is better).
-  function totalDegrees() {
-    return state ? state.bearingErrors.reduce(function (s, x) { return s + x; }, 0) : 0;
+  // The ranked metric is TOTAL DISTANCE from the target in km (lower is better).
+  // Distance is measured along the surface of the globe, so it's immune to the
+  // bearing quirk where an aim 180° "off" can still land dead on target by going
+  // the other way around the world.
+  function totalKm() {
+    return state ? Math.round(state.gapErrors.reduce(function (s, x) { return s + x; }, 0)) : 0;
   }
-  // Map a board row / history entry onto its degrees value (for compare + display).
+  // Map a board row / history entry onto its km value (for compare + display).
   function lbVal(e) {
     if (!e) return Infinity;
     if (e.value != null) return e.value;
-    if (e.degrees != null) return e.degrees;
+    if (e.km != null) return e.km;
     return Infinity;
   }
-  function lbRowDegrees(r) {
+  function lbRowKm(r) {
     var m = r.meta || {};
-    if (m.degrees != null) return Math.round(m.degrees);
+    if (m.km != null) return Math.round(m.km);
     return Math.round(Number(r.score));
   }
-  function lbBestDegrees(best) {
-    return Math.round(best.degrees != null ? best.degrees : (best.value != null ? best.value : 0));
+  function lbBestKm(best) {
+    return Math.round(best.km != null ? best.km : (best.value != null ? best.value : 0));
   }
-  function lbCell(deg) { return deg + '°'; }
+  function lbCell(km) { return fmtKm(km) + ' km'; }
 
   // ── Scoring ─────────────────────────────────────────────────────────────────
   function scoreFor(gapKm) {
@@ -253,20 +247,20 @@
     if (points >= 100)  return 'Wide of the mark.';
     return 'Wrong side of the world!';
   }
-  // Daily headline metric is bearing error in degrees (lower is better) — its
-  // own tier + phrasing so what the player sees matches the leaderboard.
-  function tierForDeg(deg) {
-    if (deg <= 15) return 'good';
-    if (deg <= 45) return 'warn';
+  // Daily headline metric is distance from the target in km (lower is better) —
+  // its own tier + phrasing so what the player sees matches the leaderboard.
+  function tierForKm(km) {
+    if (km <= 500) return 'good';
+    if (km <= 2500) return 'warn';
     return 'bad';
   }
-  function verdictTextDeg(deg) {
-    if (deg <= 2)  return 'DEAD ON!';
-    if (deg <= 10) return 'Razor sharp.';
-    if (deg <= 20) return 'Sharp aim.';
-    if (deg <= 35) return 'Good bearing.';
-    if (deg <= 60) return 'Off the mark.';
-    return 'Wrong way!';
+  function verdictTextKm(km) {
+    if (km <= 25)   return 'BULLSEYE!';
+    if (km <= 250)  return 'Dead on.';
+    if (km <= 750)  return 'So close!';
+    if (km <= 2000) return 'Good throw.';
+    if (km <= 5000) return 'Wide of the mark.';
+    return 'Wrong side of the world!';
   }
 
   // ── Panels / phases ─────────────────────────────────────────────────────────
@@ -282,17 +276,17 @@
   function totalScore() {
     return state ? state.scores.reduce(function (s, x) { return s + x; }, 0) : 0;
   }
-  // Daily HUD shows running bearing error in degrees (lower is better, matching
+  // Daily HUD shows running distance from target in km (lower is better, matching
   // the leaderboard); free play keeps the native 0–5000 points score.
   function statusLabelHtml(mode, valueStr) {
     return mode === 'daily'
-      ? 'Aim off <b id="score-total">' + valueStr + '</b>°'
+      ? 'Off by <b id="score-total">' + valueStr + '</b> km'
       : 'Score <b id="score-total">' + valueStr + '</b> / 5000';
   }
   function refreshStatus() {
     $('round-num').textContent = state ? String(state.idx + 1) : '–';
     var mode = state ? state.mode : gameMode;
-    var valueStr = state ? String(mode === 'daily' ? totalDegrees() : totalScore()) : '–';
+    var valueStr = state ? (mode === 'daily' ? fmtKm(totalKm()) : String(totalScore())) : '–';
     $('score-label').innerHTML = statusLabelHtml(mode, valueStr);
   }
 
@@ -387,20 +381,12 @@
     refreshDistance();
   }
 
-  // ── DISTANCE: warped slider (more travel for nearer distances) ─────────────
-  // Slider 0-1000 → km, piecewise-linear:
-  //   0-333  → 0-2,000 km      (~6 km per step: city-scale precision)
-  //   333-667 → 2,000-20,000   (~54 km per step)
-  //   667-1000 → 20,000-40,000 (~60 km per step)
-  var WARP = [[0, 0], [333, 2000], [667, 20000], [1000, 40000]];
+  // ── DISTANCE: linear slider ────────────────────────────────────────────────
+  // Slider 0-1000 maps straight to 0-MAX_KM, so equal drags cover equal distance
+  // anywhere on the track — no warping, and no dead zone past the far side of the
+  // Earth (MAX_KM is the antipodal distance, the farthest a throw can matter).
   function sliderToKm(v) {
-    for (var i = 1; i < WARP.length; i++) {
-      if (v <= WARP[i][0]) {
-        var a = WARP[i - 1], b = WARP[i];
-        return a[1] + (b[1] - a[1]) * (v - a[0]) / (b[0] - a[0]);
-      }
-    }
-    return MAX_KM;
+    return (v / 1000) * MAX_KM;
   }
 
   function refreshDistance() {
@@ -408,7 +394,7 @@
   }
   function onSlider() {
     if (!state) return;
-    state.distKm = Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25;
+    state.distKm = Math.min(MAX_KM, Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25);
     refreshDistance();
   }
   function nudgeDist(dir) {
@@ -424,11 +410,9 @@
     if (!state || state.phase !== 'distance') return;
     var t = state.targets[state.idx];
     state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
+    // Ranked metric: how far the dart landed from the target, along the globe.
     state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
     state.points = scoreFor(state.gapKm);
-    // Ranked metric: how far off the aim was, in whole degrees, vs the true bearing.
-    var trueBearing = bearingTo(state.origin.lat, state.origin.lon, t[1], t[2]);
-    state.bearingGapDeg = Math.round(bearingGap(state.bearing, trueBearing));
     state.phase = 'reveal';
     $('target-kicker').textContent = 'The throw…';
     $('target-sub').textContent = '';
@@ -453,24 +437,22 @@
     if (!state || state.phase !== 'reveal') return;
     state.phase = 'score';
     state.scores.push(state.points);
-    state.bearingErrors.push(state.bearingGapDeg);
+    state.gapErrors.push(state.gapKm);
     var t = state.targets[state.idx];
     var daily = state.mode === 'daily';
-    var tier = daily ? tierForDeg(state.bearingGapDeg) : tierFor(state.points);
+    var tier = daily ? tierForKm(state.gapKm) : tierFor(state.points);
 
     if (daily) {
-      // Headline = the ranked metric (degrees off). Distance is context.
-      $('verdict').textContent = verdictTextDeg(state.bearingGapDeg) + ' ' +
-        state.bearingGapDeg + '° off';
+      // Headline = the ranked metric (distance from the target).
+      $('verdict').textContent = verdictTextKm(state.gapKm) + ' ' +
+        fmtKm(state.gapKm) + ' km off';
       $('result-detail').textContent =
-        'Your aim was ' + state.bearingGapDeg + '° off the bearing to ' + t[0] + '. ' +
-        'The dart landed ' + fmtKm(state.gapKm) + ' km away.';
+        'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '.';
     } else {
       $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
         (state.points === 1 ? ' point' : ' points');
       $('result-detail').textContent =
         'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '. ' +
-        'Your aim was ' + state.bearingGapDeg + '° off. ' +
         '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
     }
     $('verdict').className = 'tn-verdict ' + tier;
@@ -500,7 +482,7 @@
 
   // ── Daily finish: shared results card + leaderboard submit ────────────────────
   function finishDaily() {
-    var deg = totalDegrees();
+    var km = totalKm();
     var archiving = !!(window.ArcadeArchive && window.ArcadeArchive.isArchiving());
     var scored = state.scored && !archiving;
     var dayKey = window.ArcadeDailySeed.dailyDateKey();
@@ -509,7 +491,7 @@
     // Record local history once per day (drives the "You" tab, streaks, and the
     // archive's ✓ done-mark). Only for a live, scored first play.
     if (scored && LB && LB.recordHistory && !lsGet(doneKey)) {
-      LB.recordHistory(LB_GAME, { date: dayKey, difficulty: 'daily', value: deg, degrees: deg });
+      LB.recordHistory(LB_GAME, { date: dayKey, difficulty: 'daily', value: km, km: km });
       if (LB.reportStats) LB.reportStats(LB_GAME);
     }
 
@@ -522,19 +504,19 @@
     var subHtml = archiving
       ? 'Practice replay — past dailies aren\'t scored.'
       : scored
-        ? 'Total bearing error across five places — lower is better.'
+        ? 'Total distance from the target across five places — lower is better.'
         : 'Daily needs your location to rank — you played unscored.';
 
     if (window.ArcadeResults && window.ArcadeResults.renderResults) {
       window.ArcadeResults.renderResults({
         mount: mount,
         headline: 'Daily complete!',
-        statHtml: deg + '<small>° total bearing error</small>',
+        statHtml: fmtKm(km) + '<small> km total from target</small>',
         subHtml: subHtml,
         dailyComplete: scored,
         gameSlug: LB_GAME,
         shareLabel: 'Share',
-        onShare: function () { shareDaily(deg); },
+        onShare: function () { shareDaily(km); },
         nextLabel: archiving ? "Back to today's daily" : 'Free play',
         onNext: function () {
           if (window.ArcadeArchive && window.ArcadeArchive.isArchiving()) setMode('daily');
@@ -551,13 +533,13 @@
         } else if (!scored) {
           lbMount.innerHTML = '<div class="lb-status">Daily needs your location to rank — playing unscored.</div>';
         } else {
-          lbRenderWin(lbMount, deg, doneKey);
+          lbRenderWin(lbMount, km, doneKey);
         }
       }
       try { mount.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
     } else {
       // Fallback if the shared results module didn't load.
-      $('verdict').textContent = 'Daily complete — ' + deg + '° total bearing error.';
+      $('verdict').textContent = 'Daily complete — ' + fmtKm(km) + ' km total from target.';
       $('verdict').className = 'tn-verdict good';
       $('result').hidden = false;
       $('tn-again-btn').hidden = false;
@@ -566,7 +548,7 @@
 
   // Submit the daily result (once per day) then render the standing. If we've
   // already submitted today, just show the board.
-  function lbRenderWin(mount, deg, doneKey) {
+  function lbRenderWin(mount, km, doneKey) {
     var board = boardKeyForOffset(0);
     function showBoard(name) {
       if (lbUi) lbUi.renderBoard(mount, board, name || null);
@@ -575,8 +557,8 @@
     function doSubmit(name) {
       mount.innerHTML = '<div class="lb-status">Submitting…</div>';
       LB.submitMetricCompletion({
-        game: LB_GAME, difficulty: 'daily', value: deg, handle: name,
-        board: board, meta: { degrees: deg }, alltimeVersion: 1
+        game: LB_GAME, difficulty: 'daily', value: km, handle: name,
+        board: board, meta: { km: km }, alltimeVersion: 2
       }).then(function (ok) {
         if (ok) lsSet(doneKey, '1');
         showBoard(name);
@@ -602,9 +584,9 @@
     });
   }
 
-  function shareDaily(deg) {
+  function shareDaily(km) {
     var dateLabel = boardKeyForOffset(0).replace('|daily', '');
-    var text = 'True North · Daily ' + dateLabel + '\n' + deg + '° total bearing error\n' +
+    var text = 'True North · Daily ' + dateLabel + '\n' + fmtKm(km) + ' km total from target\n' +
       'connectthethoughts.ca/true-north';
     if (navigator.share) {
       navigator.share({ title: 'True North', text: text }).catch(function () {});
@@ -664,11 +646,11 @@
       targets: gameMode === 'daily' ? pickDailyTargets() : pickTargets(origin),
       idx: 0,
       scores: [],
-      bearingErrors: [],
+      gapErrors: [],
       needleAngle: 0,
       headingAtLock: 0,
       distKm: sliderToKm(Number($('distance-slider').value)),
-      landing: null, gapKm: 0, points: 0, bearingGapDeg: 0
+      landing: null, gapKm: 0, points: 0
     };
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = true;
@@ -770,7 +752,7 @@
       sensor.fake = ((parseFloat(fake) % 360) + 360) % 360;
     }
 
-    // ── Shared leaderboard modal (single daily board, bearing-error metric) ────
+    // ── Shared leaderboard modal (single daily board, distance metric) ─────────
     if (LB && window.ArcadeLeaderboardUI && LB.isLeaderboardConfigured && LB.isLeaderboardConfigured()) {
       lbUi = window.ArcadeLeaderboardUI.createLeaderboardModal({
         gameSlug: LB_GAME,
@@ -778,17 +760,19 @@
         boardKeyForOffset: function (offset) { return boardKeyForOffset(offset); },
         baseDateKey: function () { return window.ArcadeDailySeed.dailyDateKey(); },
         alltimeKey: 'daily',
-        alltimeVersion: 1,
-        // Lower degrees wins, so a candidate is better when its value is smaller.
+        // v2: metric switched from bearing-error degrees to distance in km, so the
+        // all-time board must not mix the two scales.
+        alltimeVersion: 2,
+        // Lower distance wins, so a candidate is better when its value is smaller.
         bestComparator: function (e, cur) { return lbVal(e) < lbVal(cur); },
-        youStats: { metricLabel: 'Bearing error', buckets: [
-          { label: 'Under 60°', max: 60 },
-          { label: '60–119°', max: 119 },
-          { label: '120–239°', max: 239 },
-          { label: '240°+' },
+        youStats: { metricLabel: 'Distance from target', buckets: [
+          { label: 'Under 5,000 km', max: 5000 },
+          { label: '5,000–14,999 km', max: 14999 },
+          { label: '15,000–29,999 km', max: 29999 },
+          { label: '30,000 km+' },
         ] },
-        rowStat: function (r) { return lbCell(lbRowDegrees(r)); },
-        youRow: function (best) { return lbCell(lbBestDegrees(best)); },
+        rowStat: function (r) { return lbCell(lbRowKm(r)); },
+        youRow: function (best) { return lbCell(lbBestKm(best)); },
       });
       lbUi.wire();
     } else {
@@ -854,11 +838,11 @@
         },
         {
           title: 'Guess the distance',
-          body: 'Lock your direction, then <b>set how far away it is</b> — up to 40,000 km, all the way around the world — and throw.',
+          body: 'Lock your direction, then <b>set how far away it is</b> — up to 20,000 km, the far side of the world — and throw.',
         },
         {
           title: 'Watch the dart land',
-          body: 'The globe reveals your throw. The daily ranks you by <b>total aim error</b> — how many degrees off your bearings were across five places — so lower is better. (Free play keeps a classic 0–5000 points score.)',
+          body: 'The globe reveals your throw. The daily ranks you by <b>total distance from the target</b> — how many km your darts landed from the mark across five places — so lower is better. (Free play keeps a classic 0–5000 points score.)',
         },
       ];
       var tutorial = window.ArcadeTutorial.createTutorial({ gameSlug: 'true-north', steps: TUTORIAL_STEPS });
