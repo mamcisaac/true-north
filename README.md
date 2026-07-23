@@ -1,4 +1,5 @@
-# True North
+# As the Crow Flies
+Formerly "True North" — the slug and URL remain `true-north`.
 
 Lay your phone flat and don't move it. The game silently reads the device
 compass — but never shows you north. A real place is named: spin the on-screen
@@ -22,7 +23,10 @@ landing gap), five rounds, 5000 max.
   orientation math.
 - **Globe**: hand-rolled canvas-2D orthographic projection (`globe.js`), no
   dependencies. Land polygons are Natural Earth 110m (public domain) via
-  world-atlas@2, converted to `world-land.js` at vendoring time.
+  world-atlas@2, converted to `world-land.js` at vendoring time. The dart's
+  flight renders as a lofted great-circle arc above the globe surface (with a
+  faint ground track), and the reveal camera frames both flight and gap
+  off-axis so the geodesics read as curves rather than straight lines.
 
 Part of the [Connect the Thoughts](https://connectthethoughts.ca/) arcade.
 Static, no build step. Shared assets (`tokens.css`, `chrome.css`, `arcade-theme.js`,

@@ -1,4 +1,4 @@
-// True North — lay your phone flat, spin the needle toward a real place,
+// As the Crow Flies (slug: true-north) — lay your phone flat, spin the needle toward a real place,
 // pick a distance, and throw a dart around the globe.
 //
 // The device compass is read silently: north is NEVER shown before the lock.
@@ -447,12 +447,12 @@
       $('verdict').textContent = verdictTextKm(state.gapKm) + ' ' +
         fmtKm(state.gapKm) + ' km off';
       $('result-detail').textContent =
-        'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '.';
+        'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + ', as the crow flies.';
     } else {
       $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
         (state.points === 1 ? ' point' : ' points');
       $('result-detail').textContent =
-        'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + '. ' +
+        'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + ', as the crow flies. ' +
         '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
     }
     $('verdict').className = 'tn-verdict ' + tier;
@@ -586,10 +586,10 @@
 
   function shareDaily(km) {
     var dateLabel = boardKeyForOffset(0).replace('|daily', '');
-    var text = 'True North · Daily ' + dateLabel + '\n' + fmtKm(km) + ' km total from target\n' +
+    var text = 'As the Crow Flies · Daily ' + dateLabel + '\n' + fmtKm(km) + ' km total from target\n' +
       'connectthethoughts.ca/true-north';
     if (navigator.share) {
-      navigator.share({ title: 'True North', text: text }).catch(function () {});
+      navigator.share({ title: 'As the Crow Flies', text: text }).catch(function () {});
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(function () {
         var b = document.getElementById('share-btn');

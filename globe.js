@@ -1,4 +1,4 @@
-// True North — canvas orthographic globe + dart-flight reveal.
+// As the Crow Flies (slug: true-north) — canvas orthographic globe + dart-flight reveal.
 // Hand-rolled projection (no deps): rotate lat/lon unit vectors into view
 // space, hemisphere-clip via the view-axis component, roll the screen so an
 // arbitrary true bearing points "up" (this is how the globe matches the
@@ -123,6 +123,15 @@
       var p = toScreen(v[1], v[2]);
       return { x: p[0], y: p[1], visible: v[0] > 0 };
     }
+    function projectLoft(lat, lon, h) { // → {x, y, visible}
+      var f = lat * D2R, l = lon * D2R, cf = Math.cos(f);
+      var v = view(cf * Math.cos(l), cf * Math.sin(l), Math.sin(f));
+      var r = 1 + h;
+      var p = toScreen(v[1] * r, v[2] * r);
+      // Visible unless it sits BEHIND the sphere (x2<=0) AND projects INSIDE the limb.
+      var vis = v[0] > 0 || (r * r * (v[1] * v[1] + v[2] * v[2]) > 1);
+      return { x: p[0], y: p[1], visible: vis };
+    }
 
     // ── Drawing ──────────────────────────────────────────────────────────────
     function drawLandRing(vec) {
@@ -174,6 +183,15 @@
       var started = false;
       for (var i = 0; i < pts.length; i++) {
         var p = projectLL(pts[i].lat, pts[i].lon);
+        if (p.visible) { if (started) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); started = true; }
+        else started = false;
+      }
+    }
+    // Polyline through {lat, lon, h} points, breaking at occlusion (mirror of drawGeoPath).
+    function drawLoftPath(pts) {
+      var started = false;
+      for (var i = 0; i < pts.length; i++) {
+        var p = projectLoft(pts[i].lat, pts[i].lon, pts[i].h || 0);
         if (p.visible) { if (started) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); started = true; }
         else started = false;
       }
@@ -242,14 +260,16 @@
       drawGraticule(colors);
 
       if (scene) {
-        // Dart trail
+        // Ground-track shadow: faint on-surface projection of the lofted trail.
         if (scene.trail && scene.trail.length > 1) {
           ctx.strokeStyle = colors.accent;
-          ctx.lineWidth = 2.5 * dpr;
+          ctx.lineWidth = 1.5 * dpr;
           ctx.lineCap = 'round';
+          ctx.globalAlpha *= 0.28;
           ctx.beginPath();
           drawGeoPath(scene.trail);
           ctx.stroke();
+          ctx.globalAlpha = scene && scene.alpha != null ? scene.alpha : 1;
         }
         // Gap arc (dashed, tier-colored)
         if (scene.gapArc && scene.gapArc.length > 1) {
@@ -286,25 +306,6 @@
             ringAt(lp, 5 + 12 * scene.impact, colors.fg, 2, 1 - scene.impact);
           }
         }
-        // Dart: a small triangle at the tip of the trail, pointing along its course
-        if (scene.dart) {
-          var dp = projectLL(scene.dart.lat, scene.dart.lon);
-          if (dp.visible) {
-            var az = ((scene.dart.course - cam.roll) % 360) * D2R; // screen azimuth
-            ctx.save();
-            ctx.translate(dp.x, dp.y);
-            ctx.rotate(az);
-            ctx.fillStyle = colors.accent;
-            ctx.beginPath();
-            ctx.moveTo(0, -9 * dpr);
-            ctx.lineTo(5.5 * dpr, 6 * dpr);
-            ctx.lineTo(0, 2.5 * dpr);
-            ctx.lineTo(-5.5 * dpr, 6 * dpr);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-          }
-        }
       }
 
       ctx.restore(); // un-clip
@@ -314,6 +315,33 @@
       ctx.beginPath();
       ctx.arc(cx, cy, Math.min(cam.scale, size * 2), 0, Math.PI * 2);
       ctx.stroke();
+
+      // Lofted flight trail (drawn OUTSIDE the clip so it may rise past the limb)
+      if (scene && scene.trail && scene.trail.length > 1) {
+        ctx.strokeStyle = colors.accent;
+        ctx.lineWidth = 2.5 * dpr; ctx.lineCap = 'round';
+        ctx.beginPath(); drawLoftPath(scene.trail); ctx.stroke();
+      }
+      // Dart, riding the top of the arc
+      if (scene && scene.dart) {
+        var dp = projectLoft(scene.dart.lat, scene.dart.lon, scene.dart.h || 0);
+        if (dp.visible) {
+          var az = ((scene.dart.course - cam.roll) % 360) * D2R; // screen azimuth
+          ctx.save();
+          ctx.translate(dp.x, dp.y);
+          ctx.rotate(az);
+          ctx.fillStyle = colors.accent;
+          ctx.beginPath();
+          ctx.moveTo(0, -9 * dpr);
+          ctx.lineTo(5.5 * dpr, 6 * dpr);
+          ctx.lineTo(0, 2.5 * dpr);
+          ctx.lineTo(-5.5 * dpr, 6 * dpr);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
       ctx.restore();
     }
 
@@ -365,6 +393,22 @@
         return bearingTo(p.lat, p.lon, q.lat, q.lon);
       }
 
+      // Builds the flight trail with an added altitude arc: 0 at both ends,
+      // apex (loftAmp) at the midpoint of the FULL throw distance d.
+      function loftedTrail(toKm) {
+        var pts = sampleGeodesic(origin, job.bearing, 0, toKm);
+        var n = pts.length - 1;
+        for (var i = 0; i <= n; i++) {
+          var dist = toKm * i / n;
+          var frac = d > 0 ? Math.min(dist / d, 1) : 0;
+          pts[i].h = loftAmp * Math.sin(Math.PI * frac);
+        }
+        return pts;
+      }
+
+      var OFFSET_FRAC = 0.32;                                  // dart sits ~32% of globe-radius off center
+      var camOffsetKm = Math.asin(OFFSET_FRAC) * EARTH_KM;     // ≈ 2076 km
+
       // Framing for the measure phase: center between landing & target,
       // zoomed to fit both.
       var gapPts = sampleBetween(landing, target);
@@ -374,6 +418,11 @@
         scaleForKm(4000),
         Math.max(size * 0.46, 0.72 * (size / 2) / Math.max(Math.sin(sigma / 2), 0.12))
       );
+      var gapBearing = bearingTo(mid.lat, mid.lon, target.lat, target.lon);
+      // Perpendicular offset angle: proportional to the gap for small gaps, capped mid-range,
+      // and forced back toward 0 as the gap approaches antipodal (else an endpoint falls behind the limb).
+      var frameOffAng = Math.min(0.35 * sigma, 0.30, Math.max(0, 1.40 - sigma / 2));
+      var frameCenter = destination(mid.lat, mid.lon, gapBearing + 90, frameOffAng * EARTH_KM);
 
       var zoomIn = scaleForKm(3200);
       var zoomFlight = scaleForKm(Math.max(6000, Math.min(d * 1.1, 14000)));
@@ -395,9 +444,12 @@
       cam.roll = job.heading; cam.scale = zoomIn;
 
       var flightDur = 1200 + 2300 * Math.min(d / 20000, 1.6);
+      // Loft amplitude as a fraction of Earth radius. Grows with throw distance,
+      // capped so even antipodal throws don't balloon past a readable arc.
+      var loftAmp = 0.08 + 0.24 * Math.min(d / HALF_LAP_KM, 1); // 0.08 .. 0.32
       var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      var gapText = Math.round(job.gapKm).toLocaleString() + ' km from ' + target.name;
+      var gapText = Math.round(job.gapKm).toLocaleString() + ' km from ' + target.name + ', as the crow flies';
 
       var phases = [
         { // 1 — orient: you are here, globe matches the phone
@@ -421,17 +473,21 @@
             scene.pulse = null;
           }
         },
-        { // 3 — flight along the geodesic, camera chasing the dart
+        { // 3 — flight along the geodesic, camera chasing the dart, offset so the dart doesn't sit dead-center
           dur: flightDur,
           update: function (t) {
             var s = easeInOutCubic(t) * d;
             var p = destination(origin.lat, origin.lon, job.bearing, s);
             var course = courseAt(Math.min(s, d - 40));
-            scene.trail = sampleGeodesic(origin, job.bearing, 0, Math.max(s, 1));
-            scene.dart = { lat: p.lat, lon: p.lon, course: course };
+            scene.trail = loftedTrail(Math.max(s, 1));
+            var frac = d > 0 ? Math.min(s / d, 1) : 0;
+            scene.dart = { lat: p.lat, lon: p.lon, course: course, h: loftAmp * Math.sin(Math.PI * frac) };
             scene.targetPulse = (t * 4) % 1;
-            cam.lat0 = p.lat; cam.lon0 = p.lon;
-            cam.roll = course;
+            // Ramp the offset in over the first 20% of flight to avoid a pop at the phase 2→3 seam.
+            var offKm = camOffsetKm * Math.min(1, t / 0.20);
+            var off = destination(p.lat, p.lon, course + 90, offKm);
+            cam.lat0 = off.lat; cam.lon0 = off.lon;
+            cam.roll = course;                          // travel direction stays "up"
             cb.caption('Flying… ' + Math.round(s).toLocaleString() + ' km');
           }
         },
@@ -449,8 +505,8 @@
           start: function () { this.fromLat = cam.lat0; this.fromLon = cam.lon0; this.fromRoll = cam.roll; this.fromScale = cam.scale; },
           update: function (t) {
             var e = easeInOutCubic(t);
-            cam.lat0 = lerp(this.fromLat, mid.lat, e);
-            cam.lon0 = angleLerp(this.fromLon, mid.lon, e);
+            cam.lat0 = lerp(this.fromLat, frameCenter.lat, e);
+            cam.lon0 = angleLerp(this.fromLon, frameCenter.lon, e);
             cam.roll = angleLerp(this.fromRoll, 0, e);
             cam.scale = Math.exp(lerp(Math.log(this.fromScale), Math.log(frameScale), e));
             scene.impact = null;
@@ -464,7 +520,7 @@
             var n = Math.max(2, Math.round(gapPts.length * e));
             scene.gapArc = gapPts.slice(0, n);
             scene.targetPulse = 0;
-            cb.caption(Math.round(job.gapKm * e).toLocaleString() + ' km from ' + target.name);
+            cb.caption(Math.round(job.gapKm * e).toLocaleString() + ' km from ' + target.name + ', as the crow flies');
           }
         }
       ];
@@ -473,9 +529,9 @@
         scene.alpha = 1;
         scene.pulse = null; scene.impact = null; scene.dart = null; scene.targetPulse = 0;
         scene.target = target; scene.landing = landing;
-        scene.trail = sampleGeodesic(origin, job.bearing, 0, d);
+        scene.trail = loftedTrail(d);
         scene.gapArc = gapPts;
-        cam.lat0 = mid.lat; cam.lon0 = mid.lon; cam.roll = 0; cam.scale = frameScale;
+        cam.lat0 = frameCenter.lat; cam.lon0 = frameCenter.lon; cam.roll = 0; cam.scale = frameScale;
         cb.caption(gapText);
         render();
       }
