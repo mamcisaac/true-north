@@ -71,12 +71,9 @@
 
   var ROUNDS = 5;
   var MIN_KM = 100; // bearings to very nearby targets are unstable — skip them
-  // MAX_KM is the slider ceiling, kept at the antipodal great-circle distance
-  // (π·R ≈ 20,015 km) for slider range and continuity. Throws follow a constant
-  // compass bearing (a rhumb line): an E/W bearing keeps circling the parallel,
-  // and a poleward bearing sticks the dart at the pole once it arrives — so there
-  // is no single "farthest a throw can matter", but this ceiling keeps the
-  // control familiar and bounds the score.
+  // The antipodal distance (π·R) is the farthest two points on Earth can be:
+  // aim past it and you're just coming back round the other side. It's the real
+  // ceiling for both the slider and the score.
   var MAX_KM = Math.round(Math.PI * 6371); // ≈ 20,015 km
 
   // ── Geometry ────────────────────────────────────────────────────────────────
@@ -294,6 +291,7 @@
   }
 
   function showRound() {
+    if (globe) globe.setInteractive(false);
     var t = state.targets[state.idx];
     // Round 1 has no prior aim, so start at a random angle (no anchor hint).
     // Later rounds keep the last round's needle so players build off it — the
@@ -386,9 +384,8 @@
 
   // ── DISTANCE: linear slider ────────────────────────────────────────────────
   // Slider 0-1000 maps straight to 0-MAX_KM, so equal drags cover equal distance
-  // anywhere on the track — no warping. MAX_KM is just the slider ceiling: a rhumb
-  // throw past a pole sticks at the pole, and an E/W throw keeps circling the
-  // parallel, so there's no dead zone.
+  // anywhere on the track — no warping, and no dead zone past the far side of the
+  // Earth (MAX_KM is the antipodal distance, the farthest a throw can matter).
   function sliderToKm(v) {
     return (v / 1000) * MAX_KM;
   }
@@ -412,11 +409,10 @@
   // ── THROW → REVEAL ──────────────────────────────────────────────────────────
   function throwDart() {
     if (!state || state.phase !== 'distance') return;
+    globe.setInteractive(false);
     var t = state.targets[state.idx];
-    var land = TNGlobe.rhumbDestination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
+    var land = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
     state.landing = { lat: land.lat, lon: land.lon };
-    state.flownKm = land.clampedKm;
-    state.stuckAtPole = land.clampedKm < state.distKm - 0.5;
     // Ranked metric: how far the dart landed from the target, along the globe.
     state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
     state.points = scoreFor(state.gapKm);
@@ -433,8 +429,6 @@
       landing: state.landing,
       target: { lat: t[1], lon: t[2], emoji: t[3], name: t[0] },
       gapKm: state.gapKm,
-      flownKm: state.flownKm,
-      stuckAtPole: state.stuckAtPole,
       tier: tierFor(state.points)
     }, {
       caption: function (text) { $('globe-caption').textContent = text; },
@@ -460,10 +454,11 @@
     } else {
       $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
         (state.points === 1 ? ' point' : ' points');
-      var truth = TNGlobe.rhumbInverse(state.origin.lat, state.origin.lon, t[1], t[2]);
+      var gcKm = distanceKm(state.origin.lat, state.origin.lon, t[1], t[2]);
       $('result-detail').textContent =
         'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + ', as the crow flies. ' +
-        '(True answer: ' + fmtKm(truth.distKm) + ' km on a bearing of ' + (Math.round(truth.bearing) % 360) + '°.)';
+        '(True answer: ' + fmtKm(gcKm) + ' km, starting bearing ' +
+        Math.round(TNGlobe.bearingTo(state.origin.lat, state.origin.lon, t[1], t[2])) + '°.)';
     }
     $('verdict').className = 'tn-verdict ' + tier;
     refreshStatus();
@@ -474,6 +469,7 @@
     } else {
       finishGame();
     }
+    globe.setInteractive(true);
   }
 
   function finishGame() {
@@ -660,8 +656,7 @@
       needleAngle: 0,
       headingAtLock: 0,
       distKm: sliderToKm(Number($('distance-slider').value)),
-      landing: null, gapKm: 0, points: 0,
-      flownKm: 0, stuckAtPole: false
+      landing: null, gapKm: 0, points: 0
     };
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = true;
@@ -709,6 +704,7 @@
   function resetToIdle() {
     state = null;
     if (globe) globe.stop();
+    if (globe) globe.setInteractive(false);
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = false;
     $('start-btn').disabled = false;
@@ -854,6 +850,10 @@
         {
           title: 'Watch the dart land',
           body: 'The globe reveals your throw. The daily ranks you by <b>total distance from the target</b> — how many km your darts landed from the mark across five places — so lower is better. (Free play keeps a classic 0–5000 points score.)',
+        },
+        {
+          title: 'Straight over a round Earth',
+          body: 'Your dart flies <b>dead straight</b> — but the Earth curves under it, so the shortest path (a "great circle") looks bent on a flat map. Due east from mid-latitudes bends toward the equator on paper, yet it never turns. And every direction from your spot meets again at your <b>antipode, 20,000 km away</b> — so 0 km and 20,000 km are the only distances every heading shares.',
         },
       ];
       var tutorial = window.ArcadeTutorial.createTutorial({ gameSlug: 'true-north', steps: TUTORIAL_STEPS });
