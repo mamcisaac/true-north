@@ -196,6 +196,8 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
   touch-action: manipulation;
 }
+#globe.is-interactive { touch-action: none; cursor: grab; }
+#globe.is-interactive:active { cursor: grabbing; }
 .tn-globe-caption {
   margin: 0;
   text-align: center;

@@ -67,14 +67,53 @@
     ['Greenland', 72.0, -40.0, '🧊'], ['Madagascar', -18.77, 46.87, '🦎'],
     ['Mount Fuji', 35.36, 138.73, '🗻'], ['the Panama Canal', 9.08, -79.68, '🚢'],
     ['the Bermuda Triangle', 25.0, -71.0, '🌀'], ['Loch Ness', 57.32, -4.42, '🦕'],
+    ['Montreal', 45.50, -73.57, '🥯'], ['Quebec City', 46.81, -71.21, '🏰'],
+    ['Ottawa', 45.42, -75.70, '🍁'], ['Halifax', 44.65, -63.58, '⚓'],
+    ['Yellowknife', 62.45, -114.37, '🌌'], ['Boston', 42.36, -71.06, '🦞'],
+    ['Washington, D.C.', 38.90, -77.04, '🏛️'], ['Houston', 29.76, -95.37, '🚀'],
+    ['Nashville', 36.16, -86.78, '🎸'], ['Kyiv', 50.45, 30.52, '🌻'],
+    ['Prague', 50.08, 14.44, '🍺'], ['Budapest', 47.50, 19.04, '🌉'],
+    ['Zurich', 47.37, 8.54, '🧀'], ['Copenhagen', 55.68, 12.57, '⛵'],
+    ['Edinburgh', 55.95, -3.19, '🏰'], ['Barcelona', 41.39, 2.17, '⚽'],
+    ['Marrakesh', 31.63, -7.99, '🧞'], ['Lagos', 6.52, 3.38, '🎶'],
+    ['Accra', 5.56, -0.20, '🥁'], ['Dakar', 14.72, -17.47, '🐟'],
+    ['Addis Ababa', 9.02, 38.75, '☕'], ['Kinshasa', -4.32, 15.31, '🦍'],
+    ['Johannesburg', -26.20, 28.05, '💎'], ['Dubai', 25.20, 55.27, '🌆'],
+    ['Riyadh', 24.71, 46.68, '🏜️'], ['Tehran', 35.69, 51.39, '🧿'],
+    ['Baghdad', 33.31, 44.37, '📚'], ['Kabul', 34.53, 69.17, '🏔️'],
+    ['Samarkand', 39.65, 66.96, '🕌'], ['Almaty', 43.24, 76.89, '🍎'],
+    ['Ulaanbaatar', 47.89, 106.91, '🐎'], ['Kathmandu', 27.72, 85.32, '🛕'],
+    ['New Delhi', 28.61, 77.21, '🪷'], ['Colombo', 6.93, 79.86, '🍵'],
+    ['Dhaka', 23.81, 90.41, '🐅'], ['Yangon', 16.87, 96.20, '🛕'],
+    ['Hanoi', 21.03, 105.85, '🍜'], ['Ho Chi Minh City', 10.82, 106.63, '🛵'],
+    ['Kuala Lumpur', 3.14, 101.69, '🏙️'], ['Taipei', 25.03, 121.57, '🧋'],
+    ['Osaka', 34.69, 135.50, '🍣'], ['Sapporo', 43.06, 141.35, '⛄'],
+    ['Perth', -31.95, 115.86, '🦘'], ['Melbourne', -37.81, 144.96, '🎾'],
+    ['Brisbane', -27.47, 153.03, '🐨'], ['Wellington', -41.29, 174.78, '💨'],
+    ['São Paulo', -23.55, -46.63, '🏙️'], ['Quito', -0.18, -78.47, '🌋'],
+    ['La Paz', -16.49, -68.15, '🚡'], ['Montevideo', -34.90, -56.16, '🧉'],
+    ['San José, Costa Rica', 9.93, -84.08, '🦥'], ['Nuuk', 64.18, -51.72, '🛷'],
+    ['Angel Falls', 5.97, -62.54, '💦'], ['Iguazú Falls', -25.69, -54.44, '💦'],
+    ['the Matterhorn', 45.98, 7.66, '⛰️'], ['Angkor Wat', 13.41, 103.87, '🛕'],
+    ['the Dead Sea', 31.50, 35.49, '🧂'], ['Mount Kilimanjaro', -3.07, 37.35, '⛰️'],
+    ['Lake Baikal', 53.5, 108.0, '💧'], ['the Gobi Desert', 42.5, 103.5, '🏜️'],
+    ['the Faroe Islands', 62.0, -6.9, '🐑'], ['Svalbard', 78.22, 15.65, '🐻‍❄️'],
+    ['the Azores', 37.74, -25.67, '🐬'], ['Bali', -8.34, 115.09, '🏄'],
+    ['the Maldives', 4.17, 73.51, '🤿'], ['the Strait of Gibraltar', 35.95, -5.60, '🐒'],
+    ['the Cape of Good Hope', -34.36, 18.47, '⛵'], ['Cape Horn', -55.98, -67.27, '🌊'],
+    ['the Okavango Delta', -19.28, 22.79, '🐘'], ['Zanzibar', -6.16, 39.19, '🌶️'],
+    ['the Namib Desert', -24.5, 15.5, '🦂'], ['the Canary Islands', 28.29, -16.63, '🐤'],
+    ['Bora Bora', -16.50, -151.74, '🏝️'], ['Mount Vesuvius', 40.82, 14.43, '🌋'],
+    ['the Leaning Tower of Pisa', 43.72, 10.40, '🗼'], ['the Terracotta Army', 34.38, 109.28, '🏺'],
+    ['the Suez Canal', 30.46, 32.35, '🚢'], ['the Falkland Islands', -51.7, -59.2, '🐧'],
   ];
 
   var ROUNDS = 5;
   var MIN_KM = 100; // bearings to very nearby targets are unstable — skip them
-  // The antipodal distance (π·R) is the farthest two points on Earth can be:
-  // aim past it and you're just coming back round the other side. It's the real
-  // ceiling for both the slider and the score.
-  var MAX_KM = Math.round(Math.PI * 6371); // ≈ 20,015 km
+  // The slider ceiling. The true antipodal max is π·R ≈ 20,015 km, but we cap
+  // on the 25 km snap grid at a clean 20,000 — matching every piece of player
+  // copy — so no call site needs to clamp a rounded value back under the max.
+  var MAX_KM = 20000;
 
   // ── Geometry ────────────────────────────────────────────────────────────────
   var R = Math.PI / 180;
@@ -90,6 +129,11 @@
   // ── DOM ─────────────────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
   var compassEl, needleYou, globe;
+
+  // Old cached globe.js builds may predate setInteractive — never hard-crash on it.
+  function setGlobeInteractive(on) {
+    if (globe && globe.setInteractive) globe.setInteractive(on);
+  }
 
   // ── Heading source ──────────────────────────────────────────────────────────
   // The compass is read continuously but only USED at the moment of lock.
@@ -215,13 +259,15 @@
   // Map a board row / history entry onto its km value (for compare + display).
   function lbVal(e) {
     if (!e) return Infinity;
-    if (e.value != null) return e.value;
     if (e.km != null) return e.km;
+    if (e.degrees != null) return Infinity; // v1 bearing-error entry — not comparable to km
+    if (e.value != null) return e.value;
     return Infinity;
   }
   function lbRowKm(r) {
     var m = r.meta || {};
     if (m.km != null) return Math.round(m.km);
+    if (m.degrees != null) return null;
     return Math.round(Number(r.score));
   }
   function lbBestKm(best) {
@@ -291,6 +337,7 @@
   }
 
   function showRound() {
+    setGlobeInteractive(false);
     var t = state.targets[state.idx];
     // Round 1 has no prior aim, so start at a random angle (no anchor hint).
     // Later rounds keep the last round's needle so players build off it — the
@@ -394,7 +441,7 @@
   }
   function onSlider() {
     if (!state) return;
-    state.distKm = Math.min(MAX_KM, Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25);
+    state.distKm = Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25;
     refreshDistance();
   }
   function nudgeDist(dir) {
@@ -408,6 +455,7 @@
   // ── THROW → REVEAL ──────────────────────────────────────────────────────────
   function throwDart() {
     if (!state || state.phase !== 'distance') return;
+    setGlobeInteractive(false);
     var t = state.targets[state.idx];
     state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
     // Ranked metric: how far the dart landed from the target, along the globe.
@@ -451,9 +499,11 @@
     } else {
       $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
         (state.points === 1 ? ' point' : ' points');
+      var gcKm = distanceKm(state.origin.lat, state.origin.lon, t[1], t[2]);
       $('result-detail').textContent =
         'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + ', as the crow flies. ' +
-        '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
+        '(True answer: ' + fmtKm(gcKm) + ' km, starting bearing ' +
+        Math.round(TNGlobe.bearingTo(state.origin.lat, state.origin.lon, t[1], t[2])) + '°.)';
     }
     $('verdict').className = 'tn-verdict ' + tier;
     refreshStatus();
@@ -464,6 +514,7 @@
     } else {
       finishGame();
     }
+    setGlobeInteractive(true);
   }
 
   function finishGame() {
@@ -649,7 +700,7 @@
       gapErrors: [],
       needleAngle: 0,
       headingAtLock: 0,
-      distKm: sliderToKm(Number($('distance-slider').value)),
+      distKm: Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25,
       landing: null, gapKm: 0, points: 0
     };
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
@@ -697,7 +748,8 @@
   // Reset to the pre-game idle screen (no auto-start).
   function resetToIdle() {
     state = null;
-    if (globe) globe.stop();
+    if (globe) { globe.stop(); }
+    setGlobeInteractive(false);
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = false;
     $('start-btn').disabled = false;
@@ -771,7 +823,7 @@
           { label: '15,000–29,999 km', max: 29999 },
           { label: '30,000 km+' },
         ] },
-        rowStat: function (r) { return lbCell(lbRowKm(r)); },
+        rowStat: function (r) { var km = lbRowKm(r); return km == null ? Math.round(Number(r.score)) + '°' : lbCell(km); },
         youRow: function (best) { return lbCell(lbBestKm(best)); },
       });
       lbUi.wire();
@@ -843,6 +895,10 @@
         {
           title: 'Watch the dart land',
           body: 'The globe reveals your throw. The daily ranks you by <b>total distance from the target</b> — how many km your darts landed from the mark across five places — so lower is better. (Free play keeps a classic 0–5000 points score.)',
+        },
+        {
+          title: 'Straight over a round Earth',
+          body: 'Your dart flies <b>dead straight</b> — but the Earth curves under it, so the shortest path (a "great circle") looks bent on a flat map. Due east from mid-latitudes bends toward the equator on paper, yet it never turns. And every direction from your spot meets again at your <b>antipode, 20,000 km away</b> — so 0 km and 20,000 km are the only distances every heading shares.',
         },
       ];
       var tutorial = window.ArcadeTutorial.createTutorial({ gameSlug: 'true-north', steps: TUTORIAL_STEPS });

@@ -75,6 +75,20 @@
       land.push(v);
     });
 
+    // Pre-vectorized borders: per polyline, a Float64Array of unit-vector triples.
+    var borders = [];
+    (window.WORLD_BORDERS || []).forEach(function (line) {
+      var n = line.length / 2, v = new Float64Array(n * 3);
+      for (var i = 0; i < n; i++) {
+        var lon = line[i * 2] * D2R, lat = line[i * 2 + 1] * D2R;
+        var cl = Math.cos(lat);
+        v[i * 3] = cl * Math.cos(lon);
+        v[i * 3 + 1] = cl * Math.sin(lon);
+        v[i * 3 + 2] = Math.sin(lat);
+      }
+      borders.push(v);
+    });
+
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       var w = canvas.clientWidth || 320;
@@ -123,16 +137,6 @@
       var p = toScreen(v[1], v[2]);
       return { x: p[0], y: p[1], visible: v[0] > 0 };
     }
-    function projectLoft(lat, lon, h) { // → {x, y, visible}
-      var f = lat * D2R, l = lon * D2R, cf = Math.cos(f);
-      var v = view(cf * Math.cos(l), cf * Math.sin(l), Math.sin(f));
-      var r = 1 + h;
-      var p = toScreen(v[1] * r, v[2] * r);
-      // Visible unless it sits BEHIND the sphere (x2<=0) AND projects INSIDE the limb.
-      var vis = v[0] > 0 || (r * r * (v[1] * v[1] + v[2] * v[2]) > 1);
-      return { x: p[0], y: p[1], visible: vis };
-    }
-
     // ── Drawing ──────────────────────────────────────────────────────────────
     function drawLandRing(vec) {
       var n = vec.length / 3, any = false, i;
@@ -187,14 +191,31 @@
         else started = false;
       }
     }
-    // Polyline through {lat, lon, h} points, breaking at occlusion (mirror of drawGeoPath).
-    function drawLoftPath(pts) {
-      var started = false;
-      for (var i = 0; i < pts.length; i++) {
-        var p = projectLoft(pts[i].lat, pts[i].lon, pts[i].h || 0);
-        if (p.visible) { if (started) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); started = true; }
-        else started = false;
+    // Borders are OPEN polylines (not rings), so they use the graticule-style
+    // prev-visibility walk over the pre-vectorized vectors via view() directly
+    // (NOT projectLL per lat/lon, and NOT the land ring's clamp-to-limb —
+    // clamping would draw chords across the disc). Break at the limb.
+    function drawBorders(colors) {
+      // Ocean tone, not graticule: the graticule color is darker than the land
+      // fill, so it vanishes on land. Borders in the ocean color read as the
+      // same kind of seam a coastline already is.
+      ctx.strokeStyle = colors.ocean;
+      ctx.lineWidth = 1 * dpr;
+      ctx.globalAlpha = (scene && scene.alpha != null ? scene.alpha : 1) * 0.6;
+      ctx.beginPath();
+      for (var b = 0; b < borders.length; b++) {
+        var vec = borders[b], n = vec.length / 3, prev = false;
+        for (var i = 0; i < n; i++) {
+          var v = view(vec[i * 3], vec[i * 3 + 1], vec[i * 3 + 2]);
+          if (v[0] > 0) {
+            var p = toScreen(v[1], v[2]);
+            if (prev) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]);
+            prev = true;
+          } else prev = false;
+        }
       }
+      ctx.stroke();
+      ctx.globalAlpha = scene && scene.alpha != null ? scene.alpha : 1;
     }
 
     function dot(lat, lon, r, color) {
@@ -257,19 +278,29 @@
       ctx.fill('evenodd');
       ctx.globalAlpha = scene && scene.alpha != null ? scene.alpha : 1;
 
+      drawBorders(colors);
       drawGraticule(colors);
 
       if (scene) {
-        // Ground-track shadow: faint on-surface projection of the lofted trail.
-        if (scene.trail && scene.trail.length > 1) {
+        // Full great circle the throw rides — faint, finely dashed, on-surface.
+        if (scene.fullCircle && scene.fullCircle.length > 1 && (scene.circleAlpha || 0) > 0) {
           ctx.strokeStyle = colors.accent;
           ctx.lineWidth = 1.5 * dpr;
-          ctx.lineCap = 'round';
-          ctx.globalAlpha *= 0.28;
+          ctx.setLineDash([3 * dpr, 6 * dpr]);
+          ctx.globalAlpha = (scene.alpha != null ? scene.alpha : 1) * 0.30 * scene.circleAlpha;
+          ctx.beginPath();
+          drawGeoPath(scene.fullCircle);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = scene.alpha != null ? scene.alpha : 1;
+        }
+        // Flown trip — solid accent, on the surface (lies exactly on the full circle).
+        if (scene.trail && scene.trail.length > 1) {
+          ctx.strokeStyle = colors.accent;
+          ctx.lineWidth = 2.5 * dpr; ctx.lineCap = 'round';
           ctx.beginPath();
           drawGeoPath(scene.trail);
           ctx.stroke();
-          ctx.globalAlpha = scene && scene.alpha != null ? scene.alpha : 1;
         }
         // Gap arc (dashed, tier-colored)
         if (scene.gapArc && scene.gapArc.length > 1) {
@@ -306,6 +337,25 @@
             ringAt(lp, 5 + 12 * scene.impact, colors.fg, 2, 1 - scene.impact);
           }
         }
+        // Dart
+        if (scene.dart) {
+          var dp = projectLL(scene.dart.lat, scene.dart.lon);
+          if (dp.visible) {
+            var az = ((scene.dart.course - cam.roll) % 360) * D2R; // screen azimuth
+            ctx.save();
+            ctx.translate(dp.x, dp.y);
+            ctx.rotate(az);
+            ctx.fillStyle = colors.accent;
+            ctx.beginPath();
+            ctx.moveTo(0, -9 * dpr);
+            ctx.lineTo(5.5 * dpr, 6 * dpr);
+            ctx.lineTo(0, 2.5 * dpr);
+            ctx.lineTo(-5.5 * dpr, 6 * dpr);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+        }
       }
 
       ctx.restore(); // un-clip
@@ -315,32 +365,6 @@
       ctx.beginPath();
       ctx.arc(cx, cy, Math.min(cam.scale, size * 2), 0, Math.PI * 2);
       ctx.stroke();
-
-      // Lofted flight trail (drawn OUTSIDE the clip so it may rise past the limb)
-      if (scene && scene.trail && scene.trail.length > 1) {
-        ctx.strokeStyle = colors.accent;
-        ctx.lineWidth = 2.5 * dpr; ctx.lineCap = 'round';
-        ctx.beginPath(); drawLoftPath(scene.trail); ctx.stroke();
-      }
-      // Dart, riding the top of the arc
-      if (scene && scene.dart) {
-        var dp = projectLoft(scene.dart.lat, scene.dart.lon, scene.dart.h || 0);
-        if (dp.visible) {
-          var az = ((scene.dart.course - cam.roll) % 360) * D2R; // screen azimuth
-          ctx.save();
-          ctx.translate(dp.x, dp.y);
-          ctx.rotate(az);
-          ctx.fillStyle = colors.accent;
-          ctx.beginPath();
-          ctx.moveTo(0, -9 * dpr);
-          ctx.lineTo(5.5 * dpr, 6 * dpr);
-          ctx.lineTo(0, 2.5 * dpr);
-          ctx.lineTo(-5.5 * dpr, 6 * dpr);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-        }
-      }
 
       ctx.restore();
     }
@@ -379,7 +403,6 @@
       if (d < 1) return [a, b];
       return sampleGeodesic(a, bearingTo(a.lat, a.lon, b.lat, b.lon), 0, d);
     }
-
     function playReveal(job, cb) {
       stop();
       resize();
@@ -393,36 +416,39 @@
         return bearingTo(p.lat, p.lon, q.lat, q.lon);
       }
 
-      // Builds the flight trail with an added altitude arc: 0 at both ends,
-      // apex (loftAmp) at the midpoint of the FULL throw distance d.
-      function loftedTrail(toKm) {
-        var pts = sampleGeodesic(origin, job.bearing, 0, toKm);
-        var n = pts.length - 1;
-        for (var i = 0; i <= n; i++) {
-          var dist = toKm * i / n;
-          var frac = d > 0 ? Math.min(dist / d, 1) : 0;
-          pts[i].h = loftAmp * Math.sin(Math.PI * frac);
-        }
-        return pts;
-      }
+      // The throw's ENTIRE great circle (2·antipodal = 2πR ≈ 40,030 km),
+      // sampled once — ~334 points, cached for the whole reveal, never per-frame.
+      var fullCirclePts = sampleGeodesic(origin, job.bearing, 0, 2 * HALF_LAP_KM);
+      var STEP = 2 * HALF_LAP_KM / (fullCirclePts.length - 1); // km per cached sample
 
-      var OFFSET_FRAC = 0.32;                                  // dart sits ~32% of globe-radius off center
-      var camOffsetKm = Math.asin(OFFSET_FRAC) * EARTH_KM;     // ≈ 2076 km
+      // Rest view: look roughly down the great circle's pole so the ring reads
+      // as an ellipse. Pole = 90° off the origin along bearing ±90; pick the one
+      // nearer the TARGET so the target sits on the viewing hemisphere.
+      var QUARTER = HALF_LAP_KM / 2;                    // 90°, ≈ 10,007 km
+      var polePlus  = destination(origin.lat, origin.lon, job.bearing + 90, QUARTER);
+      var poleMinus = destination(origin.lat, origin.lon, job.bearing - 90, QUARTER);
+      var pole = distanceKm(polePlus.lat, polePlus.lon, target.lat, target.lon) <=
+                 distanceKm(poleMinus.lat, poleMinus.lon, target.lat, target.lon)
+                 ? polePlus : poleMinus;                // tie (target on the circle / antipodal) → polePlus, deterministic
 
-      // Framing for the measure phase: center between landing & target,
-      // zoomed to fit both.
       var gapPts = sampleBetween(landing, target);
-      var mid = gapPts[Math.floor(gapPts.length / 2)];
-      var sigma = distanceKm(landing.lat, landing.lon, target.lat, target.lon) / EARTH_KM; // radians
-      var frameScale = Math.min(
+      var mid = gapPts[Math.floor(gapPts.length / 2)];  // landing↔target midpoint
+      // Pull the camera center HALF-way from the pole toward that midpoint so the
+      // ring tilts into a strong ellipse while both landing and target stay front-side.
+      var arcPM = distanceKm(pole.lat, pole.lon, mid.lat, mid.lon);
+      var restCenter = arcPM < 1 ? mid
+        : destination(pole.lat, pole.lon,
+                      bearingTo(pole.lat, pole.lon, mid.lat, mid.lon), 0.5 * arcPM);
+      var restScale = size * 0.46;                      // wide framing — whole globe with margin
+
+      // Close-up framing for the measure: fit the landing↔target gap like the
+      // pre-redesign reveal did (4,000 km ceiling, 0.72 fill), centered on mid.
+      var sigma = distanceKm(landing.lat, landing.lon, target.lat, target.lon) / EARTH_KM;
+      var gapScale = Math.min(
         scaleForKm(4000),
         Math.max(size * 0.46, 0.72 * (size / 2) / Math.max(Math.sin(sigma / 2), 0.12))
       );
-      var gapBearing = bearingTo(mid.lat, mid.lon, target.lat, target.lon);
-      // Perpendicular offset angle: proportional to the gap for small gaps, capped mid-range,
-      // and forced back toward 0 as the gap approaches antipodal (else an endpoint falls behind the limb).
-      var frameOffAng = Math.min(0.35 * sigma, 0.30, Math.max(0, 1.40 - sigma / 2));
-      var frameCenter = destination(mid.lat, mid.lon, gapBearing + 90, frameOffAng * EARTH_KM);
+      var needCloseup = gapScale > restScale * 1.15; // only when meaningfully closer than the rest view
 
       var zoomIn = scaleForKm(3200);
       var zoomFlight = scaleForKm(Math.max(6000, Math.min(d * 1.1, 14000)));
@@ -438,18 +464,18 @@
         tier: job.tier,
         pulse: 0,
         targetPulse: 0,
-        impact: null
+        impact: null,
+        fullCircle: fullCirclePts,
+        circleAlpha: 0
       };
       cam.lat0 = origin.lat; cam.lon0 = origin.lon;
       cam.roll = job.heading; cam.scale = zoomIn;
 
       var flightDur = 1200 + 2300 * Math.min(d / 20000, 1.6);
-      // Loft amplitude as a fraction of Earth radius. Grows with throw distance,
-      // capped so even antipodal throws don't balloon past a readable arc.
-      var loftAmp = 0.08 + 0.24 * Math.min(d / HALF_LAP_KM, 1); // 0.08 .. 0.32
       var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      var gapText = Math.round(job.gapKm).toLocaleString() + ' km from ' + target.name + ', as the crow flies';
+      function gapCaption(km) { return Math.round(km).toLocaleString() + ' km from ' + target.name + ', as the crow flies'; }
+      var gapText = gapCaption(job.gapKm);
 
       var phases = [
         { // 1 — orient: you are here, globe matches the phone
@@ -473,22 +499,23 @@
             scene.pulse = null;
           }
         },
-        { // 3 — flight along the geodesic, camera chasing the dart, offset so the dart doesn't sit dead-center
+        { // 3 — flight along the great circle; camera rides the dart, travel-up.
+          //     Re-centered on the dart with roll = course, the geodesic ahead
+          //     projects as a straight vertical line while the globe turns beneath.
           dur: flightDur,
           update: function (t) {
             var s = easeInOutCubic(t) * d;
             var p = destination(origin.lat, origin.lon, job.bearing, s);
-            var course = courseAt(Math.min(s, d - 40));
-            scene.trail = loftedTrail(Math.max(s, 1));
-            var frac = d > 0 ? Math.min(s / d, 1) : 0;
-            scene.dart = { lat: p.lat, lon: p.lon, course: course, h: loftAmp * Math.sin(Math.PI * frac) };
+            var course = courseAt(Math.min(s, Math.max(0, d - 40)));
+            var k = Math.max(1, Math.floor(s / STEP));
+            scene.trail = fullCirclePts.slice(0, k + 1);
+            scene.trail.push(p);                      // exact dart tip
+            scene.dart = { lat: p.lat, lon: p.lon, course: course };
             scene.targetPulse = (t * 4) % 1;
-            // Ramp the offset in over the first 20% of flight to avoid a pop at the phase 2→3 seam.
-            var offKm = camOffsetKm * Math.min(1, t / 0.20);
-            var off = destination(p.lat, p.lon, course + 90, offKm);
-            cam.lat0 = off.lat; cam.lon0 = off.lon;
-            cam.roll = course;                          // travel direction stays "up"
-            cb.caption('Flying… ' + Math.round(s).toLocaleString() + ' km');
+            scene.circleAlpha = easeInOutCubic(t);   // fade the full circle in
+            cam.lat0 = p.lat; cam.lon0 = p.lon;      // camera centered on the dart
+            cam.roll = course;                       // travel direction stays "up"
+            cb.caption('Flying straight over the curve… ' + Math.round(s).toLocaleString() + ' km');
           }
         },
         { // 4 — impact
@@ -500,38 +527,57 @@
           },
           update: function (t) { scene.impact = easeOutCubic(t); }
         },
-        { // 5 — pull back to frame landing + target, north-up
-          dur: 1300,
-          start: function () { this.fromLat = cam.lat0; this.fromLon = cam.lon0; this.fromRoll = cam.roll; this.fromScale = cam.scale; },
+        { // 5 — pull back and spin to the rest view: the whole great circle as a
+          //     visible curve, north-up, with landing + target both in frame.
+          dur: 1600,
+          start: function () {
+            this.fromLat = cam.lat0; this.fromLon = cam.lon0;
+            this.fromRoll = cam.roll; this.fromScale = cam.scale;
+            scene.impact = null;
+          },
           update: function (t) {
             var e = easeInOutCubic(t);
-            cam.lat0 = lerp(this.fromLat, frameCenter.lat, e);
-            cam.lon0 = angleLerp(this.fromLon, frameCenter.lon, e);
+            cam.lat0 = lerp(this.fromLat, restCenter.lat, e);
+            cam.lon0 = angleLerp(this.fromLon, restCenter.lon, e);
             cam.roll = angleLerp(this.fromRoll, 0, e);
-            cam.scale = Math.exp(lerp(Math.log(this.fromScale), Math.log(frameScale), e));
-            scene.impact = null;
+            cam.scale = Math.exp(lerp(Math.log(this.fromScale), Math.log(restScale), e));
             scene.targetPulse = (t * 3) % 1;
           }
         },
-        { // 6 — measure the gap
+        { // 6 — measure the gap (great circle), rest view held.
           dur: 1300,
           update: function (t) {
             var e = easeInOutCubic(t);
             var n = Math.max(2, Math.round(gapPts.length * e));
             scene.gapArc = gapPts.slice(0, n);
             scene.targetPulse = 0;
-            cb.caption(Math.round(job.gapKm * e).toLocaleString() + ' km from ' + target.name + ', as the crow flies');
+            cb.caption(gapCaption(job.gapKm * e));
           }
         }
       ];
+
+      if (needCloseup) phases.push({ // 7 — glide in so a near-miss is actually visible
+        dur: 1100,
+        start: function () { this.fromLat = cam.lat0; this.fromLon = cam.lon0; this.fromScale = cam.scale; },
+        update: function (t) {
+          var e = easeInOutCubic(t);
+          cam.lat0 = lerp(this.fromLat, mid.lat, e);
+          cam.lon0 = angleLerp(this.fromLon, mid.lon, e);
+          cam.scale = Math.exp(lerp(Math.log(this.fromScale), Math.log(gapScale), e));
+        }
+      });
 
       function finalFrame() {
         scene.alpha = 1;
         scene.pulse = null; scene.impact = null; scene.dart = null; scene.targetPulse = 0;
         scene.target = target; scene.landing = landing;
-        scene.trail = loftedTrail(d);
+        scene.trail = sampleGeodesic(origin, job.bearing, 0, d);
+        scene.fullCircle = fullCirclePts; scene.circleAlpha = 1;
         scene.gapArc = gapPts;
-        cam.lat0 = frameCenter.lat; cam.lon0 = frameCenter.lon; cam.roll = 0; cam.scale = frameScale;
+        cam.lat0 = needCloseup ? mid.lat : restCenter.lat;
+        cam.lon0 = needCloseup ? mid.lon : restCenter.lon;
+        cam.roll = 0;
+        cam.scale = needCloseup ? gapScale : restScale;
         cb.caption(gapText);
         render();
       }
@@ -582,12 +628,49 @@
     }
     function skip() { if (skipFn) skipFn(); }
 
+    // ── Free-look after the reveal (drag to spin). Attached once; the flag
+    //    gates it so drags never fight the reveal animation or the skip-click.
+    var interactive = false, dragging = false, lastX = 0, lastY = 0, renderQueued = false;
+    function scheduleRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      requestAnimationFrame(function () { renderQueued = false; render(); });
+    }
+    canvas.addEventListener('pointerdown', function (ev) {
+      if (!interactive) return;
+      ev.preventDefault();
+      try { canvas.setPointerCapture(ev.pointerId); } catch (_) {}
+      dragging = true; lastX = ev.clientX; lastY = ev.clientY;
+    });
+    canvas.addEventListener('pointermove', function (ev) {
+      if (!interactive || !dragging) return;
+      var k = dpr / cam.scale;                 // radians of globe rotation per CSS pixel
+      var dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+      lastX = ev.clientX; lastY = ev.clientY;
+      cam.lon0 = ((cam.lon0 - dx * k / D2R + 540) % 360) - 180;   // globe follows the finger
+      cam.lat0 = Math.max(-89, Math.min(89, cam.lat0 + dy * k / D2R));
+      scheduleRender();
+    });
+    function endDrag(ev) {
+      dragging = false;
+      try { canvas.releasePointerCapture(ev.pointerId); } catch (_) {}
+    }
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+
+    function setInteractive(on) {
+      interactive = !!on;
+      if (!interactive) dragging = false;
+      canvas.classList.toggle('is-interactive', interactive);
+    }
+
     return {
       playReveal: playReveal,
       skip: skip,
       stop: stop,
       render: render,
-      cam: cam
+      cam: cam,
+      setInteractive: setInteractive
     };
   }
 
