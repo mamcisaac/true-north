@@ -4,13 +4,11 @@ Formerly "True North" — the slug and URL remain `true-north`.
 Lay your phone flat and don't move it. The game silently reads the device
 compass — but never shows you north. A real place is named: spin the on-screen
 needle toward where you think it lies (your guess bearing = device heading +
-needle angle), lock it, set a distance (0–20,000 km — the antipodal max, past
-which a throw just comes back the other way), and throw. A canvas globe —
-oriented the way your phone is physically facing — shows your dart flying the
-great-circle path for your chosen bearing and distance, then measures how far it
+needle angle), lock it, set a distance (0–20,000 km — the antipodal max), and throw. A canvas globe —
+oriented the way your phone is physically facing — shows your dart flying a
+constant-bearing rhumb path for your chosen bearing and distance, then measures how far it
 landed from the true spot. The daily ranks by **total distance from the target**
-in km across five places (lower is better) — measured along the globe, so an aim
-180° "off" that still lands on the mark scores as the bullseye it is. Free play
+in km across five places (lower is better) — measured along the globe, as the crow flies. Free play
 keeps a classic points score: up to 1000 per round (exponential falloff by
 landing gap), five rounds, 5000 max.
 
@@ -24,9 +22,9 @@ landing gap), five rounds, 5000 max.
 - **Globe**: hand-rolled canvas-2D orthographic projection (`globe.js`), no
   dependencies. Land polygons are Natural Earth 110m (public domain) via
   world-atlas@2, converted to `world-land.js` at vendoring time. The dart's
-  flight renders as a lofted great-circle arc above the globe surface (with a
-  faint ground track), and the reveal camera frames both flight and gap
-  off-axis so the geodesics read as curves rather than straight lines.
+  flight renders as a lofted rhumb arc (constant bearing) above the globe surface
+  (with a faint ground track); the landing–target gap is great-circle. The reveal
+  camera frames both off-axis so the geodesics read as curves rather than straight lines.
 
 Part of the [Connect the Thoughts](https://connectthethoughts.ca/) arcade.
 Static, no build step. Shared assets (`tokens.css`, `chrome.css`, `arcade-theme.js`,

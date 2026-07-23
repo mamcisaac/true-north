@@ -71,9 +71,12 @@
 
   var ROUNDS = 5;
   var MIN_KM = 100; // bearings to very nearby targets are unstable — skip them
-  // The antipodal distance (π·R) is the farthest two points on Earth can be:
-  // aim past it and you're just coming back round the other side. It's the real
-  // ceiling for both the slider and the score.
+  // MAX_KM is the slider ceiling, kept at the antipodal great-circle distance
+  // (π·R ≈ 20,015 km) for slider range and continuity. Throws follow a constant
+  // compass bearing (a rhumb line): an E/W bearing keeps circling the parallel,
+  // and a poleward bearing sticks the dart at the pole once it arrives — so there
+  // is no single "farthest a throw can matter", but this ceiling keeps the
+  // control familiar and bounds the score.
   var MAX_KM = Math.round(Math.PI * 6371); // ≈ 20,015 km
 
   // ── Geometry ────────────────────────────────────────────────────────────────
@@ -383,8 +386,9 @@
 
   // ── DISTANCE: linear slider ────────────────────────────────────────────────
   // Slider 0-1000 maps straight to 0-MAX_KM, so equal drags cover equal distance
-  // anywhere on the track — no warping, and no dead zone past the far side of the
-  // Earth (MAX_KM is the antipodal distance, the farthest a throw can matter).
+  // anywhere on the track — no warping. MAX_KM is just the slider ceiling: a rhumb
+  // throw past a pole sticks at the pole, and an E/W throw keeps circling the
+  // parallel, so there's no dead zone.
   function sliderToKm(v) {
     return (v / 1000) * MAX_KM;
   }
@@ -409,7 +413,10 @@
   function throwDart() {
     if (!state || state.phase !== 'distance') return;
     var t = state.targets[state.idx];
-    state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
+    var land = TNGlobe.rhumbDestination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
+    state.landing = { lat: land.lat, lon: land.lon };
+    state.flownKm = land.clampedKm;
+    state.stuckAtPole = land.clampedKm < state.distKm - 0.5;
     // Ranked metric: how far the dart landed from the target, along the globe.
     state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
     state.points = scoreFor(state.gapKm);
@@ -426,6 +433,8 @@
       landing: state.landing,
       target: { lat: t[1], lon: t[2], emoji: t[3], name: t[0] },
       gapKm: state.gapKm,
+      flownKm: state.flownKm,
+      stuckAtPole: state.stuckAtPole,
       tier: tierFor(state.points)
     }, {
       caption: function (text) { $('globe-caption').textContent = text; },
@@ -451,9 +460,10 @@
     } else {
       $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
         (state.points === 1 ? ' point' : ' points');
+      var truth = TNGlobe.rhumbInverse(state.origin.lat, state.origin.lon, t[1], t[2]);
       $('result-detail').textContent =
         'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + ', as the crow flies. ' +
-        '(True answer: ' + fmtKm(distanceKm(state.origin.lat, state.origin.lon, t[1], t[2])) + ' km away.)';
+        '(True answer: ' + fmtKm(truth.distKm) + ' km on a bearing of ' + (Math.round(truth.bearing) % 360) + '°.)';
     }
     $('verdict').className = 'tn-verdict ' + tier;
     refreshStatus();
@@ -650,7 +660,8 @@
       needleAngle: 0,
       headingAtLock: 0,
       distKm: sliderToKm(Number($('distance-slider').value)),
-      landing: null, gapKm: 0, points: 0
+      landing: null, gapKm: 0, points: 0,
+      flownKm: 0, stuckAtPole: false
     };
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = true;

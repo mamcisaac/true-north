@@ -4,7 +4,8 @@
 // arbitrary true bearing points "up" (this is how the globe matches the
 // direction the phone is physically facing).
 //
-// Exposes window.TNGlobe = { create(canvas), destination, bearingTo, distanceKm }.
+// Exposes window.TNGlobe = { create(canvas), destination, bearingTo, distanceKm,
+// rhumbDestination, rhumbInverse }.
 (function () {
   'use strict';
 
@@ -26,10 +27,10 @@
             Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) * Math.sin(dl / 2);
     return EARTH_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
-  // Forward geodesic: start point + true bearing + distance → end point.
-  // The dart path is THIS evaluated at partial distances — never a slerp
-  // between endpoints, which would fly the short way for throws past the
-  // antipode (>20,015 km).
+  // Forward great-circle destination: start + true bearing + distance → end.
+  // Used for GAP-ARC sampling (landing→target, "as the crow flies") and the
+  // chase-camera's perpendicular offset — NOT for the dart's flight path, which
+  // now follows a constant-compass rhumb line (see rhumbDestination below).
   function destination(lat, lon, bearingDeg, distKm) {
     var d = distKm / EARTH_KM, th = bearingDeg * D2R;
     var f1 = lat * D2R, l1 = lon * D2R;
@@ -39,6 +40,39 @@
     var l2 = l1 + Math.atan2(Math.sin(th) * sd * cf1, cd - sf1 * Math.sin(f2));
     var lon2 = ((l2 / D2R) + 540) % 360 - 180; // normalize to (-180, 180]
     return { lat: f2 / D2R, lon: lon2 };
+  }
+
+  // Rhumb-line (loxodrome) destination: start + constant true bearing +
+  // distance → end. This is the dart's actual flight path — a constant
+  // compass heading, unlike destination() above which follows a great circle.
+  function rhumbDestination(lat, lon, bearingDeg, distKm) {
+    var th = bearingDeg * D2R, f1 = lat * D2R, l1 = lon * D2R, delta = distKm / EARTH_KM;
+    var dphi = delta * Math.cos(th), f2 = f1 + dphi;
+    // POLE CLAMP — must be checked before any dpsi/log math (tan() blows up at ±90°).
+    if (Math.abs(f2) > Math.PI / 2) {
+      var cphi = Math.abs(Math.cos(th)); // > 0 here (pole-crossing needs a N/S component)
+      var dMax = EARTH_KM * (Math.PI / 2 - Math.abs(f1)) / cphi;
+      // Longitude at a pole is undefined (a loxodrome spirals into it);
+      // cosmetically irrelevant since the projection collapses all
+      // longitudes at |lat|=90.
+      return { lat: dphi >= 0 ? 90 : -90, lon: ((lon + 540) % 360) - 180, clampedKm: dMax };
+    }
+    var dpsi = Math.log(Math.tan(Math.PI / 4 + f2 / 2) / Math.tan(Math.PI / 4 + f1 / 2));
+    var q = Math.abs(dpsi) > 1e-12 ? dphi / dpsi : Math.cos(f1);
+    var dlam = delta * Math.sin(th) / q, l2 = l1 + dlam;
+    var lon2 = ((l2 / D2R) + 540) % 360 - 180; // same normalize as destination(), handles multi-wrap
+    return { lat: f2 / D2R, lon: lon2, clampedKm: distKm };
+  }
+
+  // Rhumb-line inverse: distance + constant bearing between two points.
+  function rhumbInverse(lat1, lon1, lat2, lon2) {
+    var f1 = lat1 * D2R, f2 = lat2 * D2R, dphi = f2 - f1, dl = (lon2 - lon1) * D2R;
+    if (Math.abs(dl) > Math.PI) dl = dl > 0 ? dl - 2 * Math.PI : dl + 2 * Math.PI; // shortest Δλ
+    var dpsi = Math.log(Math.tan(Math.PI / 4 + f2 / 2) / Math.tan(Math.PI / 4 + f1 / 2));
+    var q = Math.abs(dpsi) > 1e-12 ? dphi / dpsi : Math.cos(f1);
+    var distKm = EARTH_KM * Math.sqrt(dphi * dphi + q * q * dl * dl);
+    var bearing = ((Math.atan2(dl, dpsi) / D2R) + 360) % 360;
+    return { distKm: distKm, bearing: bearing };
   }
 
   // ── Angle helpers ──────────────────────────────────────────────────────────
@@ -379,28 +413,36 @@
       if (d < 1) return [a, b];
       return sampleGeodesic(a, bearingTo(a.lat, a.lon, b.lat, b.lon), 0, d);
     }
+    function sampleRhumb(origin, bearing, fromKm, toKm) {
+      var pts = [], stepKm = 120;
+      var n = Math.max(2, Math.ceil((toKm - fromKm) / stepKm));
+      for (var i = 0; i <= n; i++) {
+        var s = fromKm + (toKm - fromKm) * i / n;
+        var p = rhumbDestination(origin.lat, origin.lon, bearing, s);
+        pts.push({ lat: p.lat, lon: p.lon });
+      }
+      return pts;
+    }
 
     function playReveal(job, cb) {
       stop();
       resize();
       var origin = job.origin, target = job.target, landing = job.landing;
       var d = job.distKm;
+      var dFlown = (job.flownKm != null) ? job.flownKm : d;
 
       // Course (true bearing of travel) at distance s along the throw.
-      function courseAt(s) {
-        var p = destination(origin.lat, origin.lon, job.bearing, s);
-        var q = destination(origin.lat, origin.lon, job.bearing, s + 40);
-        return bearingTo(p.lat, p.lon, q.lat, q.lon);
-      }
+      // Rhumb = constant course, so this is just the throw's bearing.
+      function courseAt(s) { return job.bearing; }
 
       // Builds the flight trail with an added altitude arc: 0 at both ends,
-      // apex (loftAmp) at the midpoint of the FULL throw distance d.
+      // apex (loftAmp) at the midpoint of the FULL throw distance dFlown.
       function loftedTrail(toKm) {
-        var pts = sampleGeodesic(origin, job.bearing, 0, toKm);
+        var pts = sampleRhumb(origin, job.bearing, 0, toKm);
         var n = pts.length - 1;
         for (var i = 0; i <= n; i++) {
           var dist = toKm * i / n;
-          var frac = d > 0 ? Math.min(dist / d, 1) : 0;
+          var frac = dFlown > 0 ? Math.min(dist / dFlown, 1) : 0;
           pts[i].h = loftAmp * Math.sin(Math.PI * frac);
         }
         return pts;
@@ -425,7 +467,7 @@
       var frameCenter = destination(mid.lat, mid.lon, gapBearing + 90, frameOffAng * EARTH_KM);
 
       var zoomIn = scaleForKm(3200);
-      var zoomFlight = scaleForKm(Math.max(6000, Math.min(d * 1.1, 14000)));
+      var zoomFlight = scaleForKm(Math.max(6000, Math.min(dFlown * 1.1, 14000)));
 
       scene = {
         alpha: 0,
@@ -443,10 +485,10 @@
       cam.lat0 = origin.lat; cam.lon0 = origin.lon;
       cam.roll = job.heading; cam.scale = zoomIn;
 
-      var flightDur = 1200 + 2300 * Math.min(d / 20000, 1.6);
+      var flightDur = 1200 + 2300 * Math.min(dFlown / 20000, 1.6);
       // Loft amplitude as a fraction of Earth radius. Grows with throw distance,
       // capped so even antipodal throws don't balloon past a readable arc.
-      var loftAmp = 0.08 + 0.24 * Math.min(d / HALF_LAP_KM, 1); // 0.08 .. 0.32
+      var loftAmp = 0.08 + 0.24 * Math.min(dFlown / HALF_LAP_KM, 1); // 0.08 .. 0.32
       var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       var gapText = Math.round(job.gapKm).toLocaleString() + ' km from ' + target.name + ', as the crow flies';
@@ -473,14 +515,14 @@
             scene.pulse = null;
           }
         },
-        { // 3 — flight along the geodesic, camera chasing the dart, offset so the dart doesn't sit dead-center
+        { // 3 — flight along the rhumb line, camera chasing the dart, offset so the dart doesn't sit dead-center
           dur: flightDur,
           update: function (t) {
-            var s = easeInOutCubic(t) * d;
-            var p = destination(origin.lat, origin.lon, job.bearing, s);
-            var course = courseAt(Math.min(s, d - 40));
+            var s = easeInOutCubic(t) * dFlown;
+            var p = rhumbDestination(origin.lat, origin.lon, job.bearing, s);
+            var course = job.bearing;
             scene.trail = loftedTrail(Math.max(s, 1));
-            var frac = d > 0 ? Math.min(s / d, 1) : 0;
+            var frac = dFlown > 0 ? Math.min(s / dFlown, 1) : 0;
             scene.dart = { lat: p.lat, lon: p.lon, course: course, h: loftAmp * Math.sin(Math.PI * frac) };
             scene.targetPulse = (t * 4) % 1;
             // Ramp the offset in over the first 20% of flight to avoid a pop at the phase 2→3 seam.
@@ -496,7 +538,7 @@
           start: function () {
             scene.dart = null;
             scene.landing = landing;
-            cb.caption('Landed!');
+            cb.caption(job.stuckAtPole ? 'Stuck at the pole!' : 'Landed!');
           },
           update: function (t) { scene.impact = easeOutCubic(t); }
         },
@@ -529,7 +571,7 @@
         scene.alpha = 1;
         scene.pulse = null; scene.impact = null; scene.dart = null; scene.targetPulse = 0;
         scene.target = target; scene.landing = landing;
-        scene.trail = loftedTrail(d);
+        scene.trail = loftedTrail(dFlown);
         scene.gapArc = gapPts;
         cam.lat0 = frameCenter.lat; cam.lon0 = frameCenter.lon; cam.roll = 0; cam.scale = frameScale;
         cb.caption(gapText);
@@ -595,6 +637,8 @@
     create: create,
     destination: destination,
     bearingTo: bearingTo,
-    distanceKm: distanceKm
+    distanceKm: distanceKm,
+    rhumbDestination: rhumbDestination,
+    rhumbInverse: rhumbInverse
   };
 })();
