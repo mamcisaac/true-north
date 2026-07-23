@@ -419,6 +419,7 @@
       // The throw's ENTIRE great circle (2·antipodal = 2πR ≈ 40,030 km),
       // sampled once — ~334 points, cached for the whole reveal, never per-frame.
       var fullCirclePts = sampleGeodesic(origin, job.bearing, 0, 2 * HALF_LAP_KM);
+      var STEP = 2 * HALF_LAP_KM / (fullCirclePts.length - 1); // km per cached sample
 
       // Rest view: look roughly down the great circle's pole so the ring reads
       // as an ellipse. Pole = 90° off the origin along bearing ±90; pick the one
@@ -439,6 +440,15 @@
         : destination(pole.lat, pole.lon,
                       bearingTo(pole.lat, pole.lon, mid.lat, mid.lon), 0.5 * arcPM);
       var restScale = size * 0.46;                      // wide framing — whole globe with margin
+
+      // Close-up framing for the measure: fit the landing↔target gap like the
+      // pre-redesign reveal did (4,000 km ceiling, 0.72 fill), centered on mid.
+      var sigma = distanceKm(landing.lat, landing.lon, target.lat, target.lon) / EARTH_KM;
+      var gapScale = Math.min(
+        scaleForKm(4000),
+        Math.max(size * 0.46, 0.72 * (size / 2) / Math.max(Math.sin(sigma / 2), 0.12))
+      );
+      var needCloseup = gapScale > restScale * 1.15; // only when meaningfully closer than the rest view
 
       var zoomIn = scaleForKm(3200);
       var zoomFlight = scaleForKm(Math.max(6000, Math.min(d * 1.1, 14000)));
@@ -464,7 +474,8 @@
       var flightDur = 1200 + 2300 * Math.min(d / 20000, 1.6);
       var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      var gapText = Math.round(job.gapKm).toLocaleString() + ' km from ' + target.name + ', as the crow flies';
+      function gapCaption(km) { return Math.round(km).toLocaleString() + ' km from ' + target.name + ', as the crow flies'; }
+      var gapText = gapCaption(job.gapKm);
 
       var phases = [
         { // 1 — orient: you are here, globe matches the phone
@@ -496,7 +507,9 @@
             var s = easeInOutCubic(t) * d;
             var p = destination(origin.lat, origin.lon, job.bearing, s);
             var course = courseAt(Math.min(s, Math.max(0, d - 40)));
-            scene.trail = sampleGeodesic(origin, job.bearing, 0, Math.max(s, 1));
+            var k = Math.max(1, Math.floor(s / STEP));
+            scene.trail = fullCirclePts.slice(0, k + 1);
+            scene.trail.push(p);                      // exact dart tip
             scene.dart = { lat: p.lat, lon: p.lon, course: course };
             scene.targetPulse = (t * 4) % 1;
             scene.circleAlpha = easeInOutCubic(t);   // fade the full circle in
@@ -529,7 +542,6 @@
             cam.roll = angleLerp(this.fromRoll, 0, e);
             cam.scale = Math.exp(lerp(Math.log(this.fromScale), Math.log(restScale), e));
             scene.targetPulse = (t * 3) % 1;
-            scene.circleAlpha = 1;
           }
         },
         { // 6 — measure the gap (great circle), rest view held.
@@ -539,11 +551,21 @@
             var n = Math.max(2, Math.round(gapPts.length * e));
             scene.gapArc = gapPts.slice(0, n);
             scene.targetPulse = 0;
-            scene.circleAlpha = 1;
-            cb.caption(Math.round(job.gapKm * e).toLocaleString() + ' km from ' + target.name + ', as the crow flies');
+            cb.caption(gapCaption(job.gapKm * e));
           }
         }
       ];
+
+      if (needCloseup) phases.push({ // 7 — glide in so a near-miss is actually visible
+        dur: 1100,
+        start: function () { this.fromLat = cam.lat0; this.fromLon = cam.lon0; this.fromScale = cam.scale; },
+        update: function (t) {
+          var e = easeInOutCubic(t);
+          cam.lat0 = lerp(this.fromLat, mid.lat, e);
+          cam.lon0 = angleLerp(this.fromLon, mid.lon, e);
+          cam.scale = Math.exp(lerp(Math.log(this.fromScale), Math.log(gapScale), e));
+        }
+      });
 
       function finalFrame() {
         scene.alpha = 1;
@@ -552,7 +574,10 @@
         scene.trail = sampleGeodesic(origin, job.bearing, 0, d);
         scene.fullCircle = fullCirclePts; scene.circleAlpha = 1;
         scene.gapArc = gapPts;
-        cam.lat0 = restCenter.lat; cam.lon0 = restCenter.lon; cam.roll = 0; cam.scale = restScale;
+        cam.lat0 = needCloseup ? mid.lat : restCenter.lat;
+        cam.lon0 = needCloseup ? mid.lon : restCenter.lon;
+        cam.roll = 0;
+        cam.scale = needCloseup ? gapScale : restScale;
         cb.caption(gapText);
         render();
       }
@@ -637,7 +662,6 @@
       interactive = !!on;
       if (!interactive) dragging = false;
       canvas.classList.toggle('is-interactive', interactive);
-      if (interactive) cam.roll = 0;   // exploration is north-up (already 0 after phase 5 / finalFrame)
     }
 
     return {

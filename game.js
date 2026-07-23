@@ -110,10 +110,10 @@
 
   var ROUNDS = 5;
   var MIN_KM = 100; // bearings to very nearby targets are unstable — skip them
-  // The antipodal distance (π·R) is the farthest two points on Earth can be:
-  // aim past it and you're just coming back round the other side. It's the real
-  // ceiling for both the slider and the score.
-  var MAX_KM = Math.round(Math.PI * 6371); // ≈ 20,015 km
+  // The slider ceiling. The true antipodal max is π·R ≈ 20,015 km, but we cap
+  // on the 25 km snap grid at a clean 20,000 — matching every piece of player
+  // copy — so no call site needs to clamp a rounded value back under the max.
+  var MAX_KM = 20000;
 
   // ── Geometry ────────────────────────────────────────────────────────────────
   var R = Math.PI / 180;
@@ -129,6 +129,11 @@
   // ── DOM ─────────────────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
   var compassEl, needleYou, globe;
+
+  // Old cached globe.js builds may predate setInteractive — never hard-crash on it.
+  function setGlobeInteractive(on) {
+    if (globe && globe.setInteractive) globe.setInteractive(on);
+  }
 
   // ── Heading source ──────────────────────────────────────────────────────────
   // The compass is read continuously but only USED at the moment of lock.
@@ -254,13 +259,15 @@
   // Map a board row / history entry onto its km value (for compare + display).
   function lbVal(e) {
     if (!e) return Infinity;
-    if (e.value != null) return e.value;
     if (e.km != null) return e.km;
+    if (e.degrees != null) return Infinity; // v1 bearing-error entry — not comparable to km
+    if (e.value != null) return e.value;
     return Infinity;
   }
   function lbRowKm(r) {
     var m = r.meta || {};
     if (m.km != null) return Math.round(m.km);
+    if (m.degrees != null) return null;
     return Math.round(Number(r.score));
   }
   function lbBestKm(best) {
@@ -330,7 +337,7 @@
   }
 
   function showRound() {
-    if (globe) globe.setInteractive(false);
+    setGlobeInteractive(false);
     var t = state.targets[state.idx];
     // Round 1 has no prior aim, so start at a random angle (no anchor hint).
     // Later rounds keep the last round's needle so players build off it — the
@@ -434,7 +441,7 @@
   }
   function onSlider() {
     if (!state) return;
-    state.distKm = Math.min(MAX_KM, Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25);
+    state.distKm = Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25;
     refreshDistance();
   }
   function nudgeDist(dir) {
@@ -448,10 +455,9 @@
   // ── THROW → REVEAL ──────────────────────────────────────────────────────────
   function throwDart() {
     if (!state || state.phase !== 'distance') return;
-    globe.setInteractive(false);
+    setGlobeInteractive(false);
     var t = state.targets[state.idx];
-    var land = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
-    state.landing = { lat: land.lat, lon: land.lon };
+    state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
     // Ranked metric: how far the dart landed from the target, along the globe.
     state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
     state.points = scoreFor(state.gapKm);
@@ -508,7 +514,7 @@
     } else {
       finishGame();
     }
-    globe.setInteractive(true);
+    setGlobeInteractive(true);
   }
 
   function finishGame() {
@@ -694,7 +700,7 @@
       gapErrors: [],
       needleAngle: 0,
       headingAtLock: 0,
-      distKm: sliderToKm(Number($('distance-slider').value)),
+      distKm: Math.round(sliderToKm(Number($('distance-slider').value)) / 25) * 25,
       landing: null, gapKm: 0, points: 0
     };
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
@@ -742,8 +748,8 @@
   // Reset to the pre-game idle screen (no auto-start).
   function resetToIdle() {
     state = null;
-    if (globe) globe.stop();
-    if (globe) globe.setInteractive(false);
+    if (globe) { globe.stop(); }
+    setGlobeInteractive(false);
     var res = $('results'); if (res) { res.hidden = true; res.innerHTML = ''; }
     $('start-btn').hidden = false;
     $('start-btn').disabled = false;
@@ -817,7 +823,7 @@
           { label: '15,000–29,999 km', max: 29999 },
           { label: '30,000 km+' },
         ] },
-        rowStat: function (r) { return lbCell(lbRowKm(r)); },
+        rowStat: function (r) { var km = lbRowKm(r); return km == null ? Math.round(Number(r.score)) + '°' : lbCell(km); },
         youRow: function (best) { return lbCell(lbBestKm(best)); },
       });
       lbUi.wire();
