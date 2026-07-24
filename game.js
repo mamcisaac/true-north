@@ -408,7 +408,9 @@
     if (point) {
       state.needleAngle = 0;                 // needle is fixed up — a stale fallback
       setNeedle(0);                          // angle must never leak into the bearing
-      cardDeg = null;                        // resnap card to current heading, no spin
+      // cardDeg is NOT reset: the unwrap in renderCompassCard keeps the ring's
+      // DOM angle continuous across rounds, so this re-sync animates the short
+      // way instead of whipping a near-full turn through the CSS transition.
       renderCompassCard(currentHeading());
     } else {
       ticksEl.style.transform = 'none';      // fallback never rotates the card
@@ -571,7 +573,12 @@
 
     globe.playReveal({
       origin: state.origin,
-      heading: state.headingAtLock,
+      // LIVE heading, not the lock-frozen one: in point mode the player may
+      // have turned since locking, and phase 1's "the globe matches your
+      // phone" must be true of the phone as held NOW. The bearing stays the
+      // locked value; phase 2 rotates from current facing to the throw.
+      // (Fallback/no-compass: currentHeading() is 0 — identical to before.)
+      heading: currentHeading(),
       bearing: state.bearing,
       distKm: state.distKm,
       landing: state.landing,
