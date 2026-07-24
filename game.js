@@ -406,7 +406,8 @@
       : 'No compass — the top of the screen counts as north.';
 
     if (point) {
-      setNeedle(0);
+      state.needleAngle = 0;                 // needle is fixed up — a stale fallback
+      setNeedle(0);                          // angle must never leak into the bearing
       cardDeg = null;                        // resnap card to current heading, no spin
       renderCompassCard(currentHeading());
     } else {
