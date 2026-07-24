@@ -4,8 +4,9 @@ Formerly "True North" — the slug and URL remain `true-north`.
 Lay your phone flat and turn to aim. The game silently reads the device
 compass — but never shows you north. A real place is named: the on-screen
 needle stays pointing up — you physically turn yourself and the phone until it
-points where you think the place lies; your guess bearing is the live compass heading
-the moment you lock, set a distance (0–20,000 km — the antipodal max, past which a throw just comes back the other way), and throw. A canvas globe —
+points where you think the place lies. Your guess bearing is the live compass
+heading the moment you lock. Then set a distance (0–20,000 km — the antipodal
+max, past which a throw just comes back the other way) and throw. A canvas globe —
 oriented the way your phone is physically facing — shows your dart flying a
 great circle for your chosen bearing and distance, then measures how far it
 landed from the true spot. The daily ranks by **total distance from the target**
@@ -21,8 +22,9 @@ landing gap), five rounds, 5000 max.
   top of the screen counts as north. `?heading=NN` simulates a heading; in that
   mode dragging the dial rotates the simulated heading (as if physically turning
   the phone).
-- **Globe**: hand-rolled canvas-2D orthographic projection (`globe.js`), no
-  dependencies. Land polygons and admin-0 country borders are Natural Earth 110m (public domain)
+- **Globe**: hand-rolled canvas-2D orthographic projection (`arcade-globe.js`,
+  vended from the hub — shared with other arcade games), no dependencies. Land
+  polygons and admin-0 country borders are Natural Earth 110m (public domain)
   via world-atlas@2, vendored as `world-land.js` and `world-borders.js`. The dart flies a
   great circle for your chosen bearing and distance. The reveal camera rides the throw
   from the start (bearing pointing up, flight reads straight while the globe turns beneath);

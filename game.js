@@ -1,13 +1,16 @@
-// As the Crow Flies (slug: true-north) — lay your phone flat, spin the needle toward a real place,
-// pick a distance, and throw a dart around the globe.
+// As the Crow Flies (slug: true-north) — hold your phone flat, physically turn
+// to point it toward a real place, pick a distance, and throw a dart around the
+// globe.
 //
-// The device compass is read silently: north is NEVER shown before the lock.
-// The needle angle is screen-relative; the real-world guess bearing is
-// (device heading + needle angle). The phone must not move — heading is
-// frozen the moment the player locks their direction.
+// The device compass is read silently: north is NEVER shown. The needle is
+// FIXED pointing up; turning the phone IS the aiming. The guess bearing is the
+// LIVE compass heading captured the moment the player taps Lock (needle angle is
+// 0, so bearing = heading). The phone may turn freely while aiming.
 //
-// No compass (desktop, or permission denied): heading = 0, i.e. the top of
-// the screen counts as north. Same game, minus the physical twist.
+// No compass (desktop, or permission denied): the needle drags instead, the top
+// of the screen counts as north, and bearing = needle angle. Same game, minus
+// the physical twist. ?heading=NN simulates a heading for desktop testing —
+// dragging the dial rotates the simulated heading.
 (function () {
   'use strict';
 
@@ -128,7 +131,8 @@
 
   // ── DOM ─────────────────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
-  var compassEl, needleYou, globe;
+  var compassEl, needleYou, ticksEl, globe;
+  var cardDeg = null;        // continuous, unwrapped display heading (deg)
 
   // Old cached globe.js builds may predate setInteractive — never hard-crash on it.
   function setGlobeInteractive(on) {
@@ -167,12 +171,28 @@
     return ((Math.atan2(sensor.sinSum, sensor.cosSum) / R) + 360) % 360;
   }
 
+  // Point mode: the player aims by physically turning the phone. True when a real
+  // compass is reporting OR a fake heading is simulated (?heading=NN). Fallback
+  // mode (needle-drag) is the negation.
+  function pointMode() { return sensor.hasCompass || sensor.fake != null; }
+
   function onOrientation(e) {
     if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
       pushHeading(e.webkitCompassHeading); // iOS
     } else if (e.alpha != null && (e.absolute || sensor.hasCompass)) {
       var screenA = (screen.orientation && screen.orientation.angle) || 0;
       pushHeading((360 - e.alpha + screenA) % 360); // Android
+    }
+
+    // ── Live aim feedback ──
+    if (!state || state.phase !== 'aim') return;
+    // Boot race: first real sample arrived after a fallback-latched round opened.
+    if (!state.pointMode && sensor.hasCompass) {
+      state.pointMode = true;
+      applyAimModeUI();
+    }
+    if (state.pointMode && sensor.fake == null) {
+      renderCompassCard(currentHeading());     // stream headings onto the card
     }
   }
 
@@ -339,22 +359,72 @@
   function showRound() {
     setGlobeInteractive(false);
     var t = state.targets[state.idx];
-    // Round 1 has no prior aim, so start at a random angle (no anchor hint).
-    // Later rounds keep the last round's needle so players build off it — the
-    // angle is screen-relative and the flat phone's heading is unchanged, so
-    // the same screen angle still points the same real-world direction.
-    if (state.idx === 0) state.needleAngle = Math.floor(Math.random() * 360);
-    setNeedle(state.needleAngle);
+    state.pointMode = pointMode();               // latch mode for this round
+
+    if (state.pointMode) {
+      state.needleAngle = 0;                      // needle fixed up; phone does the aiming
+      setNeedle(0);
+    } else {
+      // Fallback: round 1 starts at a random angle (no anchor hint); later rounds
+      // keep the prior needle since the flat phone's heading is unchanged.
+      if (state.idx === 0) state.needleAngle = Math.floor(Math.random() * 360);
+      setNeedle(state.needleAngle);
+    }
+
     $('target-kicker').textContent = 'Which way to…';
     $('target-name').textContent = t[3] + ' ' + t[0];
-    $('target-sub').textContent = 'Spin the needle, then lock it in';
     $('tn-next-btn').hidden = true;
     $('tn-again-btn').hidden = true;
-    $('mode-note').textContent = sensor.hasCompass || sensor.fake != null
-      ? 'Keep your phone flat and still.'
-      : 'No compass — the top of the screen counts as north.';
+    applyAimModeUI();                             // sets target-sub, mode-note, nudges, classes, card
     refreshStatus();
     showPhase('aim');
+  }
+
+  // Sets the aim panel's copy, control visibility, and compass classes for the
+  // current round's mode. Called once per round (showRound) and again live if
+  // a real compass shows up mid-round (onOrientation boot-race upgrade).
+  function applyAimModeUI() {
+    var point = state.pointMode;
+
+    $('aim-minus').hidden = point;
+    $('aim-plus').hidden  = point;
+
+    compassEl.classList.toggle('point-mode', point);
+    compassEl.classList.remove('is-aiming');
+
+    compassEl.setAttribute('aria-label', point
+      ? 'Compass — point your phone toward the target, then lock'
+      : 'Compass — drag the needle to aim');
+    $('hold-hint').textContent = point ? 'Point your phone' : 'Drag the needle';
+
+    $('target-sub').textContent = point
+      ? 'Point your phone at it, then lock it in'
+      : 'Spin the needle, then lock it in';
+
+    $('mode-note').textContent = point
+      ? 'Keep it flat — turn yourself and the phone to aim.'
+      : 'No compass — the top of the screen counts as north.';
+
+    if (point) {
+      setNeedle(0);
+      cardDeg = null;                        // resnap card to current heading, no spin
+      renderCompassCard(currentHeading());
+    } else {
+      ticksEl.style.transform = 'none';      // fallback never rotates the card
+    }
+  }
+
+  // Counter-rotate the anonymous tick ring by -heading so the card reads as
+  // world-fixed while the fixed needle (the phone) sweeps over it. Ticks are
+  // uniform/unlabelled, so north is still never revealed.
+  function renderCompassCard(h) {
+    if (cardDeg == null) {
+      cardDeg = h;                                     // first sample: snap, no spin
+    } else {
+      var delta = ((h - (cardDeg % 360)) + 540) % 360 - 180; // shortest-path unwrap
+      cardDeg += delta;                                // avoids 359°→1° backspin
+    }
+    ticksEl.style.transform = 'rotate(' + (-cardDeg) + 'deg)';
   }
 
   // ── AIM: drag the needle (screen-relative; north never shown) ──────────────
@@ -368,10 +438,26 @@
     return (Math.atan2(dx, -dy) / R + 360) % 360;
   }
   function installAimHandlers() {
-    var dragging = false;
+    var dragging = false, dragStartDial = 0, dragStartFake = 0;
+
     compassEl.addEventListener('pointerdown', function (ev) {
       if (!state || state.phase !== 'aim') return;
       ev.preventDefault();
+
+      if (state.pointMode) {
+        if (sensor.fake != null) {
+          // TEST MODE: the phone can't physically turn, so dragging the dial
+          // rotates the SIMULATED heading. Needle stays up; ticks counter-rotate.
+          dragging = true;
+          dragStartDial = dialAngleFromEvent(ev);
+          dragStartFake = sensor.fake;
+          compassEl.classList.add('is-aiming');
+          try { compassEl.setPointerCapture(ev.pointerId); } catch (_) {}
+        }
+        return; // real compass point mode: dial is inert
+      }
+
+      // FALLBACK: existing needle-drag (unchanged)
       try { compassEl.setPointerCapture(ev.pointerId); } catch (_) { /* stale pointer */ }
       dragging = true;
       compassEl.classList.add('is-aiming');
@@ -380,6 +466,13 @@
     });
     compassEl.addEventListener('pointermove', function (ev) {
       if (!dragging) return;
+      if (state.pointMode) {
+        var cur = dialAngleFromEvent(ev);
+        var delta = cur - dragStartDial;                 // screen degrees dragged
+        sensor.fake = ((dragStartFake + delta) % 360 + 360) % 360;
+        renderCompassCard(currentHeading());              // == sensor.fake
+        return;
+      }
       state.needleAngle = dialAngleFromEvent(ev);
       setNeedle(state.needleAngle);
     });
@@ -411,7 +504,7 @@
 
   function nudgeAim(dir) {
     return function (mult) {
-      if (!state || state.phase !== 'aim') return;
+      if (!state || state.phase !== 'aim' || state.pointMode) return;
       state.needleAngle = (state.needleAngle + dir * mult + 360) % 360;
       setNeedle(state.needleAngle);
     };
@@ -419,7 +512,12 @@
 
   function lockDirection() {
     if (!state || state.phase !== 'aim') return;
-    state.headingAtLock = currentHeading(); // frozen: the phone isn't moving
+    var h = currentHeading();
+    if (state.pointMode && sensor.fake == null && !sensor.hasCompass) {
+      $('mode-note').textContent = 'Hold on — finding the compass. Point your phone and try again.';
+      return; // do not advance; no heading captured yet
+    }
+    state.headingAtLock = h;
     state.bearing = (state.headingAtLock + state.needleAngle) % 360;
     state.phase = 'distance';
     $('target-kicker').textContent = 'How far to…';
@@ -793,6 +891,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     compassEl = $('compass');
     needleYou = $('needle-you');
+    ticksEl = $('ticks');
     buildTicks();
     installAimHandlers();
     globe = ArcadeGlobe.create($('globe'));
@@ -886,7 +985,7 @@
       var TUTORIAL_STEPS = [
         {
           title: 'Aim by feel',
-          body: 'A real place is named. <b>Drag the needle</b> to point the direction you think it lies — your phone secretly reads the compass, but north is never shown.',
+          body: 'A real place is named. The needle stays pointing up — <b>turn yourself and the phone</b> until it points the way you think the place lies. Your phone secretly reads the compass, but north is never shown.',
         },
         {
           title: 'Guess the distance',

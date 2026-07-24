@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="description" content="Set your phone down, spin the needle toward a real place, pick a distance, and throw a dart around the globe. Part of the Connect the Thoughts arcade.">
+  <meta name="description" content="Point your phone toward a real place, pick a distance, and throw a dart around the globe. Part of the Connect the Thoughts arcade.">
   <title>As the Crow Flies — Connect the Thoughts</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="tokens.css?v=afb6be16">
@@ -41,7 +41,7 @@
   <script src="arcade-results.js?v=db91474d" defer></script>
   <script src="arcade-archive.js?v=453c6a8d" defer></script>
   <script src="arcade-daily-seed.js?v=5b6d533a" defer></script>
-  <script src="game.js?v=2" defer></script>
+  <script src="game.js?v=3" defer></script>
 </head>
 <body>
   <!-- arcade:topbar:start -->
@@ -113,7 +113,7 @@
 
     <!-- AIM: unlabelled rose — nothing on it hints at north -->
     <section class="tn-panel" id="panel-aim" hidden>
-      <div class="tn-compass" id="compass" aria-label="Compass — drag the needle to aim">
+      <div class="tn-compass" id="compass" aria-label="Compass — point your phone toward the target, then lock">
         <svg viewBox="0 0 240 240" width="100%" height="100%" aria-hidden="true">
           <circle cx="120" cy="120" r="112" class="tn-ring"/>
           <circle cx="120" cy="120" r="104" class="tn-face"/>
@@ -124,7 +124,7 @@
           </g>
           <circle cx="120" cy="120" r="4" class="tn-hub"/>
         </svg>
-        <div class="tn-hold-hint" id="hold-hint">Drag the needle</div>
+        <div class="tn-hold-hint" id="hold-hint">Point your phone</div>
       </div>
       <div class="tn-nudge-row">
         <button id="aim-minus" class="tn-nudge" type="button" aria-label="Rotate needle 1 degree counter-clockwise">⟲</button>
@@ -201,11 +201,11 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
       <button class="modal-close-x" id="help-close" type="button" aria-label="Close">×</button>
       <h2 id="help-title">How to play</h2>
-      <p><strong>Lay your phone flat and don't move it.</strong> The game secretly reads your compass — but never shows you north.</p>
-      <p>A real place is named. <strong>Drag the needle</strong> to point in the real-world direction you think it lies and lock it in. Then <strong>set how far away it is</strong> — up to 20,000 km, the far side of the world — and throw.</p>
+      <p><strong>Hold your phone flat and turn to aim.</strong> The game secretly reads your compass — but never shows you north.</p>
+      <p>A real place is named. The needle stays pointing up — <strong>turn yourself and the phone</strong> until it points the real-world way you think the place lies, then lock it in. Then <strong>set how far away it is</strong> — up to 20,000 km, the far side of the world — and throw.</p>
       <p>A globe appears, oriented the way your phone is actually facing. Your dart flies your chosen direction and distance along the curve of the Earth. The <strong>daily</strong> ranks you by your total distance from the target — how many km your darts landed from the mark across five places — so lower is better. <strong>Free play</strong> keeps a classic 0–5000 points score instead.</p>
       <p>Your dart flies in a straight line — a <strong>great circle</strong> — but because the Earth is round, that straight path looks curved on a flat map. Fly far enough in any direction and you reach the far side of the world, 20,000 km away.</p>
-      <p>On a computer (no compass), the top of the screen counts as north.</p>
+      <p>On a computer (no compass), the needle drags instead and the top of the screen counts as north.</p>
     </div>
   </div>
 </body>
