@@ -468,6 +468,10 @@
     compassEl.addEventListener('pointermove', function (ev) {
       if (!dragging) return;
       if (state.pointMode) {
+        // Only the ?heading test mode drags here. A fallback drag caught by the
+        // boot-race upgrade lands in this branch too — it must NOT write
+        // sensor.fake, or a real compass gets hijacked into fake mode for good.
+        if (sensor.fake == null) { endDrag(); return; }
         var cur = dialAngleFromEvent(ev);
         var delta = cur - dragStartDial;                 // screen degrees dragged
         sensor.fake = ((dragStartFake + delta) % 360 + 360) % 360;
@@ -986,7 +990,7 @@
       var TUTORIAL_STEPS = [
         {
           title: 'Aim by feel',
-          body: 'A real place is named. The needle stays pointing up — <b>turn yourself and the phone</b> until it points the way you think the place lies. Your phone secretly reads the compass, but north is never shown.',
+          body: 'A real place is named. On a phone, hold it flat — the needle stays pointing up, so <b>turn yourself and the phone</b> until it points the way you think the place lies. The compass is read secretly; north is never shown. (No compass? Drag the needle instead — the top of the screen counts as north.)',
         },
         {
           title: 'Guess the distance',
