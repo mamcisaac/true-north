@@ -116,14 +116,14 @@
   var MAX_KM = 20000;
 
   // ── Geometry ────────────────────────────────────────────────────────────────
+  // Great-circle geodesy (distanceKm / bearingTo / destination) and the Earth
+  // constants live in the shared globe (window.ArcadeGlobe) and are called
+  // directly at the use sites — this game keeps NO local haversine. Note
+  // MAX_KM above is a deliberate PRODUCT cap, not the physical maximum; that
+  // one is ArcadeGlobe.HALF_LAP_KM (π·R ≈ 20,015 km).
+  // `R` here is only deg→rad for the compass/needle screen trig, which is this
+  // game's own UI math.
   var R = Math.PI / 180;
-  function distanceKm(lat1, lon1, lat2, lon2) {
-    var f1 = lat1 * R, f2 = lat2 * R;
-    var df = (lat2 - lat1) * R, dl = (lon2 - lon1) * R;
-    var a = Math.sin(df / 2) * Math.sin(df / 2) +
-            Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) * Math.sin(dl / 2);
-    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
   function fmtKm(km) { return Math.round(km).toLocaleString(); }
 
   // ── DOM ─────────────────────────────────────────────────────────────────────
@@ -202,7 +202,7 @@
 
   function pickTargets(origin) {
     var pool = PLACES.filter(function (p) {
-      return distanceKm(origin.lat, origin.lon, p[1], p[2]) >= MIN_KM;
+      return ArcadeGlobe.distanceKm(origin.lat, origin.lon, p[1], p[2]) >= MIN_KM;
     });
     var a = pool.slice();
     for (var i = a.length - 1; i > 0; i--) {
@@ -457,9 +457,9 @@
     if (!state || state.phase !== 'distance') return;
     setGlobeInteractive(false);
     var t = state.targets[state.idx];
-    state.landing = TNGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
+    state.landing = ArcadeGlobe.destination(state.origin.lat, state.origin.lon, state.bearing, state.distKm);
     // Ranked metric: how far the dart landed from the target, along the globe.
-    state.gapKm = distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
+    state.gapKm = ArcadeGlobe.distanceKm(state.landing.lat, state.landing.lon, t[1], t[2]);
     state.points = scoreFor(state.gapKm);
     state.phase = 'reveal';
     $('target-kicker').textContent = 'The throw…';
@@ -499,11 +499,11 @@
     } else {
       $('verdict').textContent = verdictText(state.points) + ' +' + state.points +
         (state.points === 1 ? ' point' : ' points');
-      var gcKm = distanceKm(state.origin.lat, state.origin.lon, t[1], t[2]);
+      var gcKm = ArcadeGlobe.distanceKm(state.origin.lat, state.origin.lon, t[1], t[2]);
       $('result-detail').textContent =
         'Your dart landed ' + fmtKm(state.gapKm) + ' km from ' + t[0] + ', as the crow flies. ' +
         '(True answer: ' + fmtKm(gcKm) + ' km, starting bearing ' +
-        Math.round(TNGlobe.bearingTo(state.origin.lat, state.origin.lon, t[1], t[2])) + '°.)';
+        Math.round(ArcadeGlobe.bearingTo(state.origin.lat, state.origin.lon, t[1], t[2])) + '°.)';
     }
     $('verdict').className = 'tn-verdict ' + tier;
     refreshStatus();
@@ -795,7 +795,7 @@
     needleYou = $('needle-you');
     buildTicks();
     installAimHandlers();
-    globe = TNGlobe.create($('globe'));
+    globe = ArcadeGlobe.create($('globe'));
 
     // ?heading=NN fakes a device heading so the orientation math is testable
     // in a desktop browser (which has no compass).
